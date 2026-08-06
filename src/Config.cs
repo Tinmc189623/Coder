@@ -66,6 +66,15 @@ public static class ConfigEnv
     public const string OllamaBaseUrl = "OLLAMA_BASE_URL";
     public const string AnthropicApiKey = "ANTHROPIC_API_KEY";
     public const string OpenAiApiKey = "OPENAI_API_KEY";
+
+    /// <summary>OpenAI 协议选择:"chat"(/chat/completions,默认)或 "responses"(/responses)。</summary>
+    public const string OpenAiProtocol = "CODER_CLI_OPENAI_PROTOCOL";
+
+    /// <summary>Anthropic Extended Thinking 开关:"on"(默认)或 "off"。</summary>
+    public const string AnthropicThinking = "CODER_CLI_ANTHROPIC_THINKING";
+
+    /// <summary>Anthropic Prompt Caching 开关:"on"(默认)或 "off"。</summary>
+    public const string AnthropicCache = "CODER_CLI_ANTHROPIC_CACHE";
 }
 
 public static class ConfigLoader
@@ -189,7 +198,13 @@ public static class ConfigLoader
             BaseUrl: baseUrl,
             Lang: lang,
             CnMode: cnMode,
-            StreamOutput: merged.TryGetValue("streamOutput", out var so) ? (so is bool b ? b : so?.ToString() != "false") : true);
+            StreamOutput: merged.TryGetValue("streamOutput", out var so) ? (so is bool b ? b : so?.ToString() != "false") : true,
+            OpenAiProtocol: (merged.TryGetValue("openAiProtocol", out var op) ? op as string : null)
+                ?? EnvOrNull(ConfigEnv.OpenAiProtocol),
+            AnthropicThinking: ParseBoolOpt(
+                merged.TryGetValue("anthropicThinking", out var at) ? at : null, EnvOrNull(ConfigEnv.AnthropicThinking), true),
+            AnthropicCache: ParseBoolOpt(
+                merged.TryGetValue("anthropicCache", out var ac) ? ac : null, EnvOrNull(ConfigEnv.AnthropicCache), true));
 
         if (string.IsNullOrEmpty(cfg.Provider))
             throw new ConfigError("No provider configured. Pass --provider or set ANTHROPIC_API_KEY / OPENAI_API_KEY.");
@@ -208,6 +223,23 @@ public static class ConfigLoader
         if (v is bool b) return b;
         if (v is string s) return s == "1" || s.ToLowerInvariant() == "true" || s.ToLowerInvariant() == "yes";
         return null;
+    }
+
+    /// <summary>解析布尔开关:config 值优先,其次环境变量,最后默认值。</summary>
+    private static bool ParseBoolOpt(object? configValue, string? envValue, bool defaultValue)
+    {
+        if (configValue is bool cb) return cb;
+        if (configValue is string cs)
+        {
+            if (bool.TryParse(cs, out var cv)) return cv;
+            if (cs == "1") return true;
+        }
+        if (!string.IsNullOrEmpty(envValue))
+        {
+            if (bool.TryParse(envValue, out var ev)) return ev;
+            if (envValue == "1") return true;
+        }
+        return defaultValue;
     }
 
     private static EffortLevel? ParseEffort(string? s) => s?.ToLowerInvariant() switch

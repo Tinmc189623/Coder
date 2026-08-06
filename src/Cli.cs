@@ -117,7 +117,7 @@ public static class Cli
         IProvider? provider = null;
         if (!string.IsNullOrEmpty(config.ApiKey))
         {
-            try { provider = ProviderRegistry.MakeProvider(config.Provider, config.ApiKey, config.BaseUrl, config.CnMode); }
+            try { provider = ProviderRegistry.MakeProvider(config.Provider, config.ApiKey, config.BaseUrl, config.CnMode, config); }
             catch (Exception e) { Log.Instance.Warn("Provider init failed:", e.Message); }
         }
 
@@ -193,7 +193,7 @@ public static class Cli
             agent.SetProvider(null);
             return;
         }
-        try { agent.SetProvider(ProviderRegistry.MakeProvider(cfg.Provider, cfg.ApiKey, cfg.BaseUrl, cfg.CnMode)); }
+        try { agent.SetProvider(ProviderRegistry.MakeProvider(cfg.Provider, cfg.ApiKey, cfg.BaseUrl, cfg.CnMode, cfg)); }
         catch (Exception e) { agent.SetProvider(null); Log.Instance.Warn("Provider refresh failed:", e.Message); }
     }
 

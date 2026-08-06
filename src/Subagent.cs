@@ -62,7 +62,7 @@ public static class SubAgent
         IProvider provider;
         try
         {
-            provider = ProviderRegistry.MakeProvider(config.Provider, config.ApiKey, config.BaseUrl);
+            provider = ProviderRegistry.MakeProvider(config.Provider, config.ApiKey, config.BaseUrl, config.CnMode, config);
         }
         catch (Exception e)
         {

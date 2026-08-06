@@ -193,6 +193,9 @@ public interface IProvider
     ProviderCapabilities Capabilities { get; }
     Task<CompletionResult> CompleteAsync(CompletionRequest req);
     Task<CompletionResult> StreamAsync(CompletionRequest req, Action<IStreamEvent> onEvent);
+
+    /// <summary>精确统计输入 token 数(如 Anthropic /v1/messages/count_tokens)。不支持时返回 null。</summary>
+    Task<int?> CountInputTokensAsync(CompletionRequest req) => Task.FromResult<int?>(null);
 }
 
 public sealed record CoderConfig(
@@ -215,7 +218,10 @@ public sealed record CoderConfig(
     string? Lang = null,
     bool CnMode = false,
     bool DeepOptimize = false,
-    bool StreamOutput = true);
+    bool StreamOutput = true,
+    string? OpenAiProtocol = null,      // "chat" (default) | "responses"
+    bool AnthropicThinking = true,
+    bool AnthropicCache = true);
 
 public sealed record PermissionDecision(
     string Behavior, // "allow" | "deny" | "ask"

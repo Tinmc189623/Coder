@@ -121,7 +121,11 @@ public static class ProviderRegistry
         Tools: true, Streaming: true, SystemChannel: true, Images: false, PromptCaching: false,
         Thinking: false, RequiresApiKey: true, DisplayName: id, ApiKeyEnvVar: "CODER_CLI_AUTH_TOKEN");
 
-    public static IProvider MakeProvider(string id, string? apiKey, string? baseUrl, bool cnMode = false)
+    /// <summary>OpenAI 协议选择:读 CODER_CLI_OPENAI_PROTOCOL(config/env),仅 "responses" 启用新协议,其余默认 "chat"。</summary>
+    public static string ResolveOpenAiProtocol(CoderConfig? config)
+        => config?.OpenAiProtocol?.ToLowerInvariant() ?? string.Empty;
+
+    public static IProvider MakeProvider(string id, string? apiKey, string? baseUrl, bool cnMode = false, CoderConfig? config = null)
     {
         id = id.ToLowerInvariant();
         if (!Known.TryGetValue(id, out var meta))
@@ -153,9 +157,23 @@ public static class ProviderRegistry
         var finalBase = baseUrl ?? meta.DefaultBaseURL ?? "";
         return id switch
         {
-            "anthropic" => new AnthropicProvider(resolvedKey!, finalBase),
+            "anthropic" => CreateAnthropic(resolvedKey!, finalBase, config),
+            // OpenAI: CODER_CLI_OPENAI_PROTOCOL=responses 走 /v1/responses,默认仍为 /chat/completions。
+            "openai" when ResolveOpenAiProtocol(config) == "responses" =>
+                new OpenAIResponsesProvider("openai", meta.Caps, resolvedKey ?? "ollama", finalBase),
             _ => new OpenAICompatProvider(id, meta.Caps, resolvedKey ?? "ollama", finalBase),
         };
+    }
+
+    /// <summary>创建 Anthropic provider,按 EffortLevel 映射 thinking 预算,读取 thinking/cache 开关。</summary>
+    private static AnthropicProvider CreateAnthropic(string apiKey, string baseUrl, CoderConfig? config)
+    {
+        if (config == null) return new AnthropicProvider(apiKey, baseUrl);
+        var (budget, _, _) = Coder.Config.ConfigLoader.EffortToSettings(config.EffortLevel);
+        return new AnthropicProvider(apiKey, baseUrl,
+            thinkingBudget: budget,
+            enableThinking: config.AnthropicThinking,
+            enableCache: config.AnthropicCache);
     }
 
     private static string? ResolveKey(string[] envKeys)
@@ -232,6 +250,9 @@ public class OpenAICompatProvider : BaseProvider
     {
         if (RequiresApiKey) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ApiKey);
     }
+
+    /// <summary>精确 token 计数;基类不支持,子类(如 Anthropic count_tokens)可覆写。</summary>
+    public virtual Task<int?> CountInputTokensAsync(CompletionRequest req) => Task.FromResult<int?>(null);
 
     public override async Task<CompletionResult> CompleteAsync(CompletionRequest req)
     {
@@ -495,10 +516,316 @@ public class OpenAICompatProvider : BaseProvider
     }
 }
 
-// ── Anthropic provider ──────────────────────────────────────────────────────
-public sealed class AnthropicProvider : OpenAICompatProvider
+// ── OpenAI Responses API provider (/v1/responses) ───────────────────────────
+// The Responses API is OpenAI's successor to chat/completions: `input` array
+// instead of `messages`, function_call items instead of tool_calls, and a
+// different SSE event surface. Kept as a separate provider because the wire
+// formats share almost nothing with the chat-completions family.
+public class OpenAIResponsesProvider : BaseProvider
 {
-    public AnthropicProvider(string apiKey, string baseUrl) : base("anthropic", ProviderRegistry.GetProviderCaps("anthropic")!, apiKey, baseUrl) { }
+    private readonly HttpClient _http;
+    private readonly string _apiKey;
+    private readonly string _baseUrl;
+    private readonly string _id;
+
+    public OpenAIResponsesProvider(string id, ProviderCapabilities caps, string apiKey, string baseUrl)
+    {
+        _id = id;
+        Capabilities = caps;
+        _apiKey = apiKey;
+        _baseUrl = baseUrl.TrimEnd('/');
+        _http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+    }
+
+    public override string Id => _id;
+    public override ProviderCapabilities Capabilities { get; }
+
+    private string Endpoint() => $"{_baseUrl}/responses";
+
+    // ── complete / stream ───────────────────────────────────────────────
+    public override async Task<CompletionResult> CompleteAsync(CompletionRequest req)
+    {
+        var resp = await PostAsync(BuildBody(req, stream: false));
+        var json = await resp.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var text = "";
+        var toolCalls = new List<AssistantToolUse>();
+        if (root.TryGetProperty("output", out var output) && output.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in output.EnumerateArray())
+            {
+                var kind = item.TryGetProperty("type", out var t) ? t.GetString() : null;
+                switch (kind)
+                {
+                    case "message":
+                        if (item.TryGetProperty("content", out var blocks) && blocks.ValueKind == JsonValueKind.Array)
+                            foreach (var b in blocks.EnumerateArray())
+                                if (b.TryGetProperty("type", out var bt) && bt.GetString() == "output_text"
+                                    && b.TryGetProperty("text", out var tEl))
+                                    text += tEl.GetString() ?? "";
+                        break;
+                    case "function_call":
+                        toolCalls.Add(new AssistantToolUse(
+                            item.TryGetProperty("call_id", out var cid) ? cid.GetString() ?? "" : "",
+                            item.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "",
+                            ParseArgs(item.TryGetProperty("arguments", out var ar) ? ar.GetString() ?? "{}" : "{}")));
+                        break;
+                }
+            }
+        }
+        var usage = ParseUsageJson(root);
+        return new CompletionResult(FinalizeContent(text, toolCalls), StopReason: "stop", Usage: usage);
+    }
+
+    public override async Task<CompletionResult> StreamAsync(CompletionRequest req, Action<IStreamEvent> onEvent)
+    {
+        var resp = await PostAsync(BuildBody(req, stream: true), stream: true);
+        using var stream = await resp.Content.ReadAsStreamAsync();
+        var (text, toolCalls, usage) = await ParseResponsesSseAsync(stream, onEvent, req.Signal);
+        onEvent(new StreamEventDone(Usage: usage));
+        return new CompletionResult(FinalizeContent(text, toolCalls), Usage: usage);
+    }
+
+    // ── request building ────────────────────────────────────────────────
+    protected virtual Dictionary<string, object?> BuildBody(CompletionRequest req, bool stream)
+    {
+        var input = new List<object?>();
+        if (!string.IsNullOrWhiteSpace(req.System))
+            input.Add(new Dictionary<string, object?> { ["role"] = "system", ["content"] = req.System });
+
+        foreach (var m in Normalize(req.Messages))
+        {
+            switch (m.Content)
+            {
+                case string s:
+                    input.Add(new Dictionary<string, object?> { ["role"] = "user", ["content"] = s });
+                    break;
+                case List<AssistantContent> ac:
+                    // Assistant turn: text becomes an assistant message, tool
+                    // calls become top-level function_call items.
+                    var textParts = new List<string>();
+                    var toolCalls = new List<object?>();
+                    foreach (var c in ac)
+                    {
+                        switch (c)
+                        {
+                            case AssistantText t: textParts.Add(t.Text); break;
+                            case AssistantToolUse tu:
+                                toolCalls.Add(new Dictionary<string, object?>
+                                {
+                                    ["type"] = "function_call",
+                                    ["call_id"] = tu.Id,
+                                    ["name"] = tu.Name,
+                                    ["arguments"] = JsonSerializer.Serialize(tu.Input),
+                                });
+                                break;
+                        }
+                    }
+                    if (textParts.Count > 0)
+                        input.Add(new Dictionary<string, object?>
+                        {
+                            ["role"] = "assistant",
+                            ["content"] = new List<object?>
+                            {
+                                new Dictionary<string, object?> { ["type"] = "output_text", ["text"] = string.Join("", textParts) },
+                            },
+                        });
+                    input.AddRange(toolCalls);
+                    break;
+                case List<UserContentBlock> uc:
+                    // User turn: text blocks become input_text, tool results
+                    // become function_call_output items.
+                    var content = new List<object?>();
+                    foreach (var b in uc)
+                    {
+                        if (b.Type == "tool_result")
+                            input.Add(new Dictionary<string, object?>
+                            {
+                                ["type"] = "function_call_output",
+                                ["call_id"] = b.ToolUseId,
+                                ["output"] = b.Content?.ToString() ?? b.Text ?? "",
+                            });
+                        else
+                            content.Add(new Dictionary<string, object?> { ["type"] = "input_text", ["text"] = b.Text ?? "" });
+                    }
+                    if (content.Count > 0)
+                        input.Add(new Dictionary<string, object?> { ["role"] = "user", ["content"] = content });
+                    break;
+            }
+        }
+
+        var body = new Dictionary<string, object?>
+        {
+            ["model"] = req.Model,
+            ["input"] = input,
+            ["stream"] = stream,
+            ["temperature"] = req.Temperature ?? 0.2,
+            ["max_output_tokens"] = req.MaxTokens ?? 8192,
+        };
+        if (req.Tools != null && req.Tools.Count > 0)
+        {
+            body["tools"] = req.Tools.Select(t => new Dictionary<string, object?>
+            {
+                ["type"] = "function",
+                ["name"] = t.Name,
+                ["description"] = t.Description,
+                ["parameters"] = t.InputSchema,
+            }).ToList();
+            body["tool_choice"] = req.ToolChoice switch
+            {
+                ToolChoiceNone => "none",
+                ToolChoiceAny => "auto",
+                _ => "auto",
+            };
+        }
+        return body;
+    }
+
+    // ── HTTP ────────────────────────────────────────────────────────────
+    private static Dictionary<string, object?> ParseArgs(string json)
+    {
+        try { return JsonSerializer.Deserialize<Dictionary<string, object?>>(json) ?? new(); }
+        catch { return new() { ["_raw"] = json }; }
+    }
+
+    private async Task<HttpResponseMessage> PostAsync(object body, bool stream = false)
+    {
+        var json = JsonSerializer.Serialize(body);
+        var req = new HttpRequestMessage(HttpMethod.Post, Endpoint())
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+        var resp = await _http.SendAsync(req, stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var err = await resp.Content.ReadAsStringAsync();
+            throw new ProviderError($"HTTP {(int)resp.StatusCode}: {err}");
+        }
+        return resp;
+    }
+
+    // ── SSE parsing (responses event surface) ───────────────────────────
+    protected virtual async Task<(string text, List<AssistantToolUse> toolCalls, TokenUsage?)> ParseResponsesSseAsync(
+        Stream stream, Action<IStreamEvent> onEvent, CancellationToken signal)
+    {
+        var text = "";
+        var toolCalls = new List<AssistantToolUse>();
+        var toolById = new Dictionary<string, (string name, string args)>();
+        var started = new HashSet<string>();
+
+        void MaybeStart(string id)
+        {
+            if (started.Contains(id)) return;
+            if (!toolById.TryGetValue(id, out var info)) return;
+            started.Add(id);
+            onEvent(new StreamEventToolUseStart(id, info.name));
+        }
+
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        string? line;
+        while ((line = await reader.ReadLineAsync()) != null)
+        {
+            if (signal.IsCancellationRequested) break;
+            if (!line.StartsWith("data:")) continue;
+            var payload = line["data:".Length..].Trim();
+            if (payload.Length == 0 || payload == "[DONE]") continue;
+            using var doc = JsonDocument.Parse(payload);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("type", out var typeEl)) continue;
+            var evt = typeEl.GetString();
+
+            switch (evt)
+            {
+                case "response.output_text.delta":
+                    if (root.TryGetProperty("delta", out var d) && d.ValueKind == JsonValueKind.String)
+                    {
+                        var piece = d.GetString() ?? "";
+                        text += piece;
+                        onEvent(new StreamEventText(piece));
+                    }
+                    break;
+
+                case "response.output_item.added":
+                    if (root.TryGetProperty("item", out var item)
+                        && item.TryGetProperty("type", out var it) && it.GetString() == "function_call")
+                    {
+                        var id = item.TryGetProperty("call_id", out var cid) ? cid.GetString() ?? "" : "";
+                        var name = item.TryGetProperty("name", out var nm) ? nm.GetString() ?? "tool" : "tool";
+                        toolById[id] = (name, "");
+                        MaybeStart(id);
+                    }
+                    break;
+
+                case "response.function_call_arguments.delta":
+                    if (root.TryGetProperty("item_id", out var iid) && root.TryGetProperty("delta", out var ad))
+                    {
+                        var key = iid.GetString() ?? "";
+                        var piece = ad.GetString() ?? "";
+                        if (toolById.TryGetValue(key, out var info))
+                        {
+                            toolById[key] = (info.name, info.args + piece);
+                            if (piece.Length > 0) onEvent(new StreamEventToolUseDelta(key, piece));
+                        }
+                    }
+                    break;
+
+                case "response.output_item.done":
+                    if (root.TryGetProperty("output_item", out var doneItem))
+                    {
+                        var id = doneItem.TryGetProperty("call_id", out var cid2) ? cid2.GetString() ?? "" : "";
+                        if (toolById.TryGetValue(id, out var fin))
+                        {
+                            var input = ParseArgs(fin.args.Length > 0 ? fin.args : "{}");
+                            toolCalls.Add(new AssistantToolUse(id, fin.name, input));
+                            onEvent(new StreamEventToolUseEnd(id, input));
+                        }
+                    }
+                    break;
+
+                case "response.completed":
+                    if (root.TryGetProperty("response", out var respEl))
+                    {
+                        var u = ParseUsageJson(respEl);
+                        if (u != null) return (text, toolCalls, u);
+                    }
+                    break;
+            }
+        }
+        return (text, toolCalls, null);
+    }
+
+    /// <summary>Responses API 的 usage 字段名(input_tokens/output_tokens)。</summary>
+    private static TokenUsage? ParseUsageJson(JsonElement root)
+    {
+        if (root.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object)
+        {
+            int inp = u.TryGetProperty("input_tokens", out var i) ? i.GetInt32() : 0;
+            int outp = u.TryGetProperty("output_tokens", out var o) ? o.GetInt32() : 0;
+            int cr = u.TryGetProperty("input_tokens_details", out var id)
+                && id.TryGetProperty("cached_tokens", out var ct) ? ct.GetInt32() : 0;
+            return new TokenUsage(inp, outp, cr, 0);
+        }
+        return null;
+    }
+}
+
+// ── Anthropic provider ──────────────────────────────────────────────────────
+public class AnthropicProvider : OpenAICompatProvider
+{
+    private readonly int _thinkingBudget;
+    private readonly bool _enableThinking;
+    private readonly bool _enableCache;
+
+    public AnthropicProvider(string apiKey, string baseUrl, int thinkingBudget = 4000, bool enableThinking = true, bool enableCache = true)
+        : base("anthropic", ProviderRegistry.GetProviderCaps("anthropic")!, apiKey, baseUrl)
+    {
+        _thinkingBudget = thinkingBudget;
+        _enableThinking = enableThinking;
+        _enableCache = enableCache;
+    }
 
     protected override string Endpoint() => $"{BaseURL}/v1/messages";
 
@@ -513,6 +840,7 @@ public sealed class AnthropicProvider : OpenAICompatProvider
 
         var text = "";
         var toolCalls = new List<AssistantToolUse>();
+        var thinking = new List<string>();
         if (root.TryGetProperty("content", out var blocks) && blocks.ValueKind == JsonValueKind.Array)
         {
             foreach (var b in blocks.EnumerateArray())
@@ -520,6 +848,8 @@ public sealed class AnthropicProvider : OpenAICompatProvider
                 var kind = b.TryGetProperty("type", out var bt) ? bt.GetString() : null;
                 if (kind == "text" && b.TryGetProperty("text", out var tEl))
                     text += tEl.GetString() ?? "";
+                else if (kind == "thinking" && b.TryGetProperty("thinking", out var thEl))
+                    thinking.Add(thEl.GetString() ?? "");
                 else if (kind == "tool_use")
                     toolCalls.Add(new AssistantToolUse(
                         b.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "",
@@ -529,6 +859,10 @@ public sealed class AnthropicProvider : OpenAICompatProvider
                             : new()));
             }
         }
+        // Thinking 块跟随内容一起返回(UI 通过 hooks 消费,消息历史保留推理轨迹)。
+        var content = FinalizeContent(text, toolCalls);
+        if (thinking.Count > 0)
+            content.InsertRange(0, thinking.Select(t => (AssistantContent)new AssistantThinking(t)));
 
         TokenUsage? usage = null;
         if (root.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object)
@@ -537,7 +871,7 @@ public sealed class AnthropicProvider : OpenAICompatProvider
                 ReadInt(u, "cache_read_input_tokens", 0), ReadInt(u, "cache_creation_input_tokens", 0));
 
         var stop = root.TryGetProperty("stop_reason", out var sr) ? sr.GetString() : null;
-        return new CompletionResult(FinalizeContent(text, toolCalls), StopReason: stop ?? "stop", Usage: usage);
+        return new CompletionResult(content, StopReason: stop ?? "stop", Usage: usage);
     }
 
     protected override void ApplyAuth(HttpRequestMessage req)
@@ -577,17 +911,60 @@ public sealed class AnthropicProvider : OpenAICompatProvider
             ["max_tokens"] = req.MaxTokens ?? 8192,
             ["stream"] = stream,
         };
-        if (!string.IsNullOrEmpty(req.System)) body["system"] = req.System;
+        // Extended Thinking:预算来自 EffortLevel 映射,缓存命中时按 cache_control 链路计费。
+        if (_enableThinking && _thinkingBudget > 0)
+            body["thinking"] = new Dictionary<string, object?> { ["type"] = "enabled", ["budget_tokens"] = _thinkingBudget };
+
+        // Prompt Caching:system 必须是 block 数组才能挂 cache_control;工具列表末项挂 breakpoint。
+        if (_enableCache)
+        {
+            if (!string.IsNullOrEmpty(req.System))
+                body["system"] = new List<object?>
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["type"] = "text",
+                        ["text"] = req.System,
+                        ["cache_control"] = new Dictionary<string, object?> { ["type"] = "ephemeral" },
+                    },
+                };
+            else if (req.System != null)
+                body["system"] = req.System;
+        }
+        else if (!string.IsNullOrEmpty(req.System))
+        {
+            body["system"] = req.System;
+        }
+
         if (req.Tools != null && req.Tools.Count > 0)
         {
-            body["tools"] = req.Tools.Select(t => new Dictionary<string, object?>
+            var tools = req.Tools.Select(t => new Dictionary<string, object?>
             {
                 ["name"] = t.Name,
                 ["description"] = t.Description,
                 ["input_schema"] = t.InputSchema,
             }).ToList();
+            if (_enableCache)
+                tools[^1]["cache_control"] = new Dictionary<string, object?> { ["type"] = "ephemeral" };
+            body["tools"] = tools;
         }
         return body;
+    }
+
+    // ── Count Tokens API ─────────────────────────────────────────────────
+    /// <summary>POST /v1/messages/count_tokens 精确统计输入 token,供上下文预算使用。</summary>
+    public override async Task<int?> CountInputTokensAsync(CompletionRequest req)
+    {
+        var body = BuildBody(req, stream: false);
+        body.Remove("stream");
+        body.Remove("max_tokens");
+        body.Remove("thinking");
+        var resp = await PostAsync(body);
+        var json = await resp.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.TryGetProperty("input_tokens", out var it))
+            return it.GetInt32();
+        return null;
     }
 
     private Dictionary<string, object?> ConvertAssistantAnthropic(List<AssistantContent> ac)
