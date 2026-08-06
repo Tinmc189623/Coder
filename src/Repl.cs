@@ -536,14 +536,15 @@ public static class Repl
 
             Cli.RefreshProvider(cfg, st.Agent);
             st.Renderer.BeginTurn();
+            var aborted = false;
             try
             {
                 await st.Agent.Run(input);
             }
-            catch (AbortError) { StreamRenderer.PrintInfo(I18n.T("repl.interrupted")); }
+            catch (AbortError) { aborted = true; StreamRenderer.PrintInfo(I18n.T("repl.interrupted")); }
             catch (CoderError e) { StreamRenderer.PrintError(e.Message); }
             catch (Exception e) { StreamRenderer.PrintError(e.Message); Log.Instance.Debug(e.ToString()); }
-            st.Renderer.EndTurn();
+            st.Renderer.EndTurn(aborted);
 
             AutoCompact(st);
         }

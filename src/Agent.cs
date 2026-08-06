@@ -53,6 +53,7 @@ public sealed class AgentLoop
     public void SetMessages(List<Message> messages) => _messages = messages;
     public List<Message> GetMessages() => new(_messages);
     public TokenUsage GetUsage() => _totalUsage;
+    public string GetSystemPrompt() => _systemText;
     public void SetHooks(IAgentHooks hooks) => _hooks = hooks;
     public void Abort() => _aborted = true;
 

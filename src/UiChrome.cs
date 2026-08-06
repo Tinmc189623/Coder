@@ -24,6 +24,16 @@ public static class Terminal
         catch { return 80; }
     }
 
+    public static int Rows()
+    {
+        try
+        {
+            var h = Console.WindowHeight;
+            return h > 0 ? h : 24;
+        }
+        catch { return 24; }
+    }
+
     public static bool IsInteractive()
         => !Console.IsInputRedirected && !Console.IsOutputRedirected;
 }
@@ -203,61 +213,122 @@ public static class Markdown
     private static readonly Regex Code = new(@"`([^`]+)`", RegexOptions.Compiled);
     private static readonly Regex Link = new(@"\[([^\]]+)\]\(([^)]+)\)", RegexOptions.Compiled);
 
+    /// <summary>整篇渲染(静态路径,用于 /skills、/memory)。</summary>
     public static string Render(string md)
     {
         var sb = new StringBuilder();
         var inFence = false;
+        var fenceLang = "";
+        var table = new List<string>();
         foreach (var line in md.Replace("\r\n", "\n").Split('\n'))
         {
-            if (line.TrimStart().StartsWith("```"))
+            // 表格行缓存,闭合时整体提交。
+            if (!inFence && IsTableRow(line))
             {
-                inFence = !inFence;
-                sb.AppendLine(Theme.Dim(line));
+                table.Add(line);
                 continue;
             }
-            if (inFence) { sb.AppendLine(Theme.Info(line)); continue; }
+            if (table.Count > 0) { sb.AppendLine(RenderTable(table)); table.Clear(); }
 
-            var m = Regex.Match(line, @"^(#{1,6})\s+(.*)$");
-            if (m.Success)
+            if (!inFence && line.TrimStart().StartsWith("```"))
             {
-                var level = m.Groups[1].Value.Length;
-                var text = Inline(m.Groups[2].Value);
-                sb.AppendLine(level <= 2 ? Theme.Brand(Theme.Bold(text)) : Theme.Bold(text));
+                fenceLang = Regex.Match(line.TrimStart(), @"^```([a-zA-Z0-9_+-]*)").Groups[1].Value;
+                inFence = true;
+                sb.AppendLine(Theme.Dim(fenceLang.Length > 0 ? $"```{fenceLang}" : "```"));
                 continue;
             }
-
-            var bullet = Regex.Match(line, @"^(\s*)[-*+]\s+(.*)$");
-            if (bullet.Success)
+            if (inFence && line.TrimStart().StartsWith("```"))
             {
-                sb.AppendLine($"{bullet.Groups[1].Value}{Theme.BrandSecondary("•")} {Inline(bullet.Groups[2].Value)}");
+                inFence = false;
+                sb.AppendLine(Theme.Dim("```"));
                 continue;
             }
-
-            var numbered = Regex.Match(line, @"^(\s*)(\d+)\.\s+(.*)$");
-            if (numbered.Success)
+            if (inFence)
             {
-                sb.AppendLine($"{numbered.Groups[1].Value}{Theme.BrandSecondary(numbered.Groups[2].Value + ".")} {Inline(numbered.Groups[3].Value)}");
+                sb.AppendLine(Syntax.Highlight(line, fenceLang));
                 continue;
             }
 
-            if (line.TrimStart().StartsWith("> "))
-            {
-                sb.AppendLine(Theme.Dim("┃ ") + Theme.Dim(Inline(line.TrimStart()[2..])));
-                continue;
-            }
+            sb.AppendLine(RenderLine(line));
+        }
+        if (table.Count > 0) sb.AppendLine(RenderTable(table));
+        return sb.ToString().TrimEnd();
+    }
 
-            if (Regex.IsMatch(line, @"^\s*([-*_])\s*\1\s*\1[\s\-*_]*$"))
-            {
-                sb.AppendLine(Chrome.Divider());
-                continue;
-            }
+    /// <summary>单行渲染(静态与流式共用)。</summary>
+    public static string RenderLine(string line)
+    {
+        var m = Regex.Match(line, @"^(#{1,6})\s+(.*)$");
+        if (m.Success)
+        {
+            var level = m.Groups[1].Value.Length;
+            var text = Inline(m.Groups[2].Value);
+            return level <= 2 ? Theme.Brand(Theme.Bold(text)) : Theme.Bold(text);
+        }
 
-            sb.AppendLine(Inline(line));
+        var bullet = Regex.Match(line, @"^(\s*)[-*+]\s+(.*)$");
+        if (bullet.Success)
+            return $"{bullet.Groups[1].Value}{Theme.BrandSecondary("•")} {Inline(bullet.Groups[2].Value)}";
+
+        var numbered = Regex.Match(line, @"^(\s*)(\d+)\.\s+(.*)$");
+        if (numbered.Success)
+            return $"{numbered.Groups[1].Value}{Theme.BrandSecondary(numbered.Groups[2].Value + ".")} {Inline(numbered.Groups[3].Value)}";
+
+        if (line.TrimStart().StartsWith("> "))
+            return Theme.Dim("┃ ") + Theme.Dim(Inline(line.TrimStart()[2..]));
+
+        if (Regex.IsMatch(line, @"^\s*([-*_])\s*\1\s*\1[\s\-*_]*$"))
+            return Chrome.Divider();
+
+        return Inline(line);
+    }
+
+    /// <summary>表格行判定:| a | b |(分隔行 |---| 也算)。</summary>
+    public static bool IsTableRow(string line)
+        => line.TrimStart().StartsWith('|') && line.TrimEnd().EndsWith('|') && line.IndexOf('|', 1) > 0;
+
+    /// <summary>整表渲染:对齐列宽,表头加粗,分隔行暗色。</summary>
+    public static string RenderTable(List<string> rows)
+    {
+        if (rows.Count == 0) return "";
+        var cells = rows.Select(r => SplitTableRow(r)).ToList();
+        var cols = cells.Max(c => c.Count);
+        if (cols == 0) return string.Join("\n", rows);
+
+        var widths = new int[cols];
+        for (var c = 0; c < cols; c++)
+            widths[c] = cells.Max(row => c < row.Count ? TextFmt.DisplayWidth(row[c]) : 0);
+
+        var sb = new StringBuilder();
+        for (var r = 0; r < cells.Count; r++)
+        {
+            var isSep = rows[r].Trim().StartsWith('|') && rows[r].Contains('-') && !rows[r].Any(char.IsLetter);
+            var line = new StringBuilder("  ");
+            for (var c = 0; c < cols; c++)
+            {
+                var cell = c < cells[r].Count ? cells[r][c] : "";
+                if (isSep)
+                    line.Append(Theme.Dim(new string('─', Math.Max(widths[c], 1))) + " ");
+                else
+                {
+                    var pad = Math.Max(0, widths[c] - TextFmt.DisplayWidth(cell));
+                    var txt = r == 0 ? Theme.Bold(cell) : cell;
+                    line.Append(txt + new string(' ', pad + 1));
+                }
+            }
+            sb.AppendLine(line.ToString().TrimEnd());
         }
         return sb.ToString().TrimEnd();
     }
 
-    private static string Inline(string s)
+    private static List<string> SplitTableRow(string row)
+    {
+        var inner = row.Trim().Trim('|');
+        return inner.Split('|').Select(s => s.Trim()).ToList();
+    }
+
+    /// <summary>行内标记:code / bold / italic / link。</summary>
+    public static string Inline(string s)
     {
         s = Code.Replace(s, m => Theme.Info(m.Groups[1].Value));
         s = Bold.Replace(s, m => Theme.Bold(m.Groups[1].Value));
@@ -329,19 +400,68 @@ public static class PermissionDialog
     /// (0 = allow once, 1 = always allow, 2 = deny). Surfaces the *stakes* before
     /// the user approves: a risk tier badge and, for file tools, a real diff of
     /// what will hit disk — so the user is never approving blind.
+    /// Keys: y/1 allow once · a/2 always allow · n/3/Esc deny · e expand · ↑↓ move.
+    /// A 200ms anti-misclick gate swallows keys arriving before the panel renders.
     /// </summary>
-    public static int Prompt(ToolDefinition tool, ToolInvocation inv, string cwd = "")
+    public static int Prompt(ToolDefinition tool, ToolInvocation inv, string cwd = "",
+        TimeProvider? clock = null, Func<ConsoleKeyInfo>? keySource = null)
     {
+        clock ??= TimeProvider.System;
+        keySource ??= () => Console.ReadKey(true);
         var zh = I18n.Current == "zh-CN";
         var (tier, label) = RiskLevel.Assess(tool, inv, cwd);
+        var dangerous = tier is RiskTier.Critical or RiskTier.Dangerous;
+        var sel = dangerous ? 2 : 0;
+        var expanded = false;
+        // 防误触 gate:从面板渲染前开始计时,200ms 内按键全部吞掉。
+        var gate = clock.GetTimestamp();
 
+        Render(tool, inv, cwd, tier, label, dangerous, sel, expanded);
+
+        while (true)
+        {
+            var key = keySource();
+            if (clock.GetElapsedTime(gate) < TimeSpan.FromMilliseconds(200)) continue;   // 防误触
+
+            switch (key.Key)
+            {
+                case ConsoleKey.Y: return 0;                                  // allow once
+                case ConsoleKey.A: return 1;                                  // always allow
+                case ConsoleKey.N or ConsoleKey.Escape: return 2;             // deny
+                case ConsoleKey.E:                                            // expand
+                    expanded = !expanded;
+                    Render(tool, inv, cwd, tier, label, dangerous, sel, expanded);
+                    break;
+                case ConsoleKey.UpArrow:
+                    sel = Math.Max(0, sel - 1);
+                    Render(tool, inv, cwd, tier, label, dangerous, sel, expanded);
+                    break;
+                case ConsoleKey.DownArrow:
+                    sel = Math.Min(2, sel + 1);
+                    Render(tool, inv, cwd, tier, label, dangerous, sel, expanded);
+                    break;
+                case ConsoleKey.Enter: return sel;
+                case ConsoleKey.D1: return 0;
+                case ConsoleKey.D2: return 1;
+                case ConsoleKey.D3: return 2;
+            }
+        }
+    }
+
+    private static int _lastPanelLines;
+
+    /// <summary>渲染面板:选项行带 ▶ 高亮;e 展开时显示完整参数与完整 diff。重绘前擦除上一帧。</summary>
+    private static void Render(ToolDefinition tool, ToolInvocation inv, string cwd,
+        RiskTier tier, string label, bool dangerous, int sel, bool expanded)
+    {
+        var zh = I18n.Current == "zh-CN";
         var rows = new List<string>
         {
             Theme.Bold(zh ? $"请求执行工具：{tool.Name}" : $"Tool requests permission: {tool.Name}") +
             "  " + RiskLevel.Badge(tier, label),
         };
 
-        if (tier == RiskTier.Critical || tier == RiskTier.Dangerous)
+        if (dangerous)
             rows.Add(Theme.Warn(zh ? "⚠ 此操作可能不可逆，请确认你是故意的。" :
                                       "⚠ This may be irreversible — make sure it is intended."));
 
@@ -349,19 +469,34 @@ public static class PermissionDialog
         {
             if (k.StartsWith('_')) continue;
             var s = v is string str ? str : System.Text.Json.JsonSerializer.Serialize(v);
-            var maxVal = Chrome.BoxInner - Chrome.Indent.Length - TextFmt.DisplayWidth(k) - 6;
-            rows.Add($"{Chrome.Indent}{Theme.Dim(k + ":")} {TextFmt.TruncateVisible(s, Math.Max(12, maxVal))}");
+            var limit = expanded ? 2000 : Math.Max(12, Chrome.BoxInner - Chrome.Indent.Length - TextFmt.DisplayWidth(k) - 6);
+            rows.Add($"{Chrome.Indent}{Theme.Dim(k + ":")} {TextFmt.TruncateVisible(s, limit)}");
         }
 
         var preview = FileDiffPreview(tool.Name, inv.Input, cwd);
-        if (preview != null) rows.AddRange(preview);
+        if (preview != null) rows.AddRange(expanded ? preview : preview.Take(5));
 
-        Console.Out.Write(Chrome.BoxPanel(rows) + "\n");
+        rows.Add("");
+        var labels = zh
+            ? new[] { "本次允许 [y]", "始终允许 [a]", dangerous ? "拒绝（推荐）[n]" : "拒绝 [n]" }
+            : new[] { "Allow once [y]", "Always allow [a]", dangerous ? "Deny (recommended) [n]" : "Deny [n]" };
+        for (var i = 0; i < labels.Length; i++)
+            rows.Add(i == sel ? Theme.Brand("▶ ") + Theme.Bold(labels[i]) : "   " + labels[i]);
+        rows.Add(Theme.Dim(zh ? "[e] 展开全部 · ↑↓ 选择 · Enter 确认" : "[e] expand · ↑↓ select · Enter confirm"));
 
-        var options = zh
-            ? new List<string> { "本次允许", "始终允许该工具", tier is RiskTier.Critical or RiskTier.Dangerous ? "拒绝（推荐）" : "拒绝" }
-            : new List<string> { "Allow once", "Always allow this tool", tier is RiskTier.Critical or RiskTier.Dangerous ? "Deny (recommended)" : "Deny" };
-        return Prompter.Choose(zh ? $"是否执行 {tool.Name}?" : $"Run {tool.Name}?", options);
+        var panel = Chrome.BoxPanel(rows);
+        var lines = panel.Replace("\r\n", "\n").Split('\n').Length;
+
+        // 重绘:擦掉上一帧面板行数,再画新的。
+        if (_lastPanelLines > 0 && Terminal.IsInteractive())
+        {
+            Console.Out.Write($"[{Math.Min(_lastPanelLines, Terminal.Rows() - 2)}A");
+            for (var i = 0; i < _lastPanelLines - 1; i++) Console.Out.Write("[2K[1B");
+            Console.Out.Write("[2K\r");
+        }
+        Console.Out.Write(panel + "\n");
+        Console.Out.Flush();
+        _lastPanelLines = lines;
     }
 
     /// <summary>Build a diff preview for file_write / file_edit, read from disk

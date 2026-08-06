@@ -26,7 +26,7 @@ production-grade AI coding agent for the terminal
 | 路径 | 说明 |
 |------|------|
 | `Coder.csproj` | 项目文件(仓库根) |
-| `src/` | C# 源码 — 27 个文件,命名空间 `Coder.{Cli,Core,Providers,Tools,Ui,Config,Skills,Memory,…}` |
+| `src/` | C# 源码 — 32 个文件,命名空间 `Coder.{Cli,Core,Providers,Tools,Ui,Config,Skills,Memory,Agents,…}` |
 | `tests/unit/` | C# 测试项目(反射 runner,无 xUnit) |
 | `installer/` | 图形安装器源码(WinForms,自包含单文件) |
 | `logo.ico` | 品牌图标(16–256 px,嵌入主程序与安装器) |
@@ -34,6 +34,10 @@ production-grade AI coding agent for the terminal
 | `dist/` | 旧 TypeScript 构建产物(已被 `archive/coder-ts/` 取代,不属于 .NET 构建) |
 | `archive/coder-ts/` | 最初的 TypeScript/Node 实现(已被取代,留作参考) |
 | `archive/web/` | 遗留的本地 Web 服务 / Web UI(已从 CLI 优先设计中移除) |
+
+## 终端界面
+
+Nexsteaduser 紫色系色板(电光紫 / 青蓝 / 琥珀,与 logo.ico 一致)。交互会话提供:流式 markdown(标题、列表、表格、带语法高亮的代码围栏)、工具调用卡片(进行中/成功/失败状态)、常驻底部状态行(回合状态机、上下文用量、权限模式、token 计数)、方向键菜单、带 200ms 防误触与 `y/a/n/e` 快捷键的权限对话框。管道输出保持纯文本。
 
 ## 构建与运行
 

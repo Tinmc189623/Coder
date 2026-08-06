@@ -8,7 +8,28 @@ Released by [Nexsteaduser](https://github.com/Tinmc189623/Coder) · Copyright ©
 
 ## [Unreleased]
 
-- (none)
+### Added
+
+- **Terminal UI overhaul**: Nexsteaduser violet palette (electric violet #AF87FF / cyan #00D7FF / amber #FFAF00, matching logo.ico), replacing the gold ramp.
+- **Streaming markdown** in the main dialogue: headings, lists, quotes, tables (column-aligned), fenced code with line-level syntax highlighting; incremental parsing commits complete lines and only redraws the unfinished tail.
+- **Tool-call cards**: queued/running/done/failed states with spinner, risk badge, live elapsed time, output box (8-line cap with overflow notice).
+- **Persistent status bar**: turn phase machine (requesting/streaming/thinking/tool/done/interrupted), context usage (>70% warn, >90% error), permission mode, token counters, turn number.
+- **Single-writer Screen coordinator**: live-block repaint + committed-output scroll, eliminating the old spinner-thread `\r` interleaving bug.
+- **Permission dialog**: 200ms anti-misclick gate (TimeProvider-injectable), `y/a/n/e` shortcuts, `e` expand, arrow-key navigation.
+- **Arrow-key menus** for `Prompter.Choose` (non-interactive keeps the numbered ReadLine fallback).
+- **Todo list iconography**: ✓/◐/✕/○ glyphs with semantic colors, i18n title.
+
+### Changed
+
+- Unit tests 110 total (palette degradation, syntax highlighting, streaming markdown, state machine, screen coordination, tool cards, permission dialog).
+- Piped/non-interactive output stays byte-identical to before (smoke suite green).
+
+### Known limitations
+
+- Streaming mid-resize may misalign one frame (ticker self-heals at 100ms).
+- Cross-line markdown constructs (bold spanning lines) render per line.
+- Syntax highlighting has no cross-line string/comment state.
+- Ctrl+C during a permission dialog takes effect on next keypress.
 
 ## [0.3.0] — 2026-08-06
 

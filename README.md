@@ -28,11 +28,20 @@ version from `Brand.Version` and the configured provider/model, see
 | Path | What it is |
 |------|------------|
 | `Coder.csproj` | The project file (root-level) |
-| `src/` | C# sources — 27 files, namespaces `Coder.{Cli,Core,Providers,Tools,Ui,Config,Skills,Memory,…}` |
+| `src/` | C# sources — 32 files, namespaces `Coder.{Cli,Core,Providers,Tools,Ui,Config,Skills,Memory,Agents,…}` |
 | `tests/unit/` | C# test project (reflection-based runner, no xUnit) |
 | `dist/` | Stale TypeScript build output from the superseded `archive/coder-ts/` tree — not part of the .NET build |
 | `archive/coder-ts/` | The original TypeScript/Node implementation (superseded, kept for reference) |
 | `archive/web/` | The legacy local web server / Web UI, dropped from the CLI-first design |
+
+## Terminal UI
+
+Nexsteaduser violet palette (electric violet / cyan / amber, matching the logo).
+Interactive sessions get: streaming markdown (headings, lists, tables, fenced
+code with syntax highlighting), live tool-call cards with progress states, a
+persistent bottom status bar (phase machine, context usage, permission mode,
+token counters), arrow-key menus, and a permission dialog with 200ms
+anti-misclick gate and `y/a/n/e` shortcuts. Piped output stays plain text.
 
 ## Build & run
 

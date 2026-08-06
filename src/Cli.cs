@@ -175,6 +175,16 @@ public static class Cli
                 return 2;
             }
             RefreshProvider(config, agent);
+            renderer.SetStatusSource(() => new StatusModel
+            {
+                Phase = Phase.Requesting,
+                ContextUsed = EstimateContext(config, agent),
+                ContextTotal = config.ContextWindow,
+                Mode = config.PermissionMode,
+                InputTokens = agent.GetUsage().InputTokens,
+                OutputTokens = agent.GetUsage().OutputTokens,
+                Turn = 1,
+            });
             renderer.BeginTurn();
             try
             {
@@ -188,7 +198,7 @@ public static class Cli
                 var finalPrompt = string.IsNullOrEmpty(pd.AdditionalContext) ? prompt : prompt + "\n\n" + pd.AdditionalContext;
                 await agent.Run(finalPrompt);
             }
-            catch (Exception e) { renderer.EndTurn(); StreamRenderer.PrintError(e.Message); return 1; }
+            catch (Exception e) { renderer.EndTurn(aborted: true); StreamRenderer.PrintError(e.Message); return 1; }
             renderer.EndTurn();
             try { await hookManager.StopAsync(); } catch { }
             return 0;
@@ -209,6 +219,14 @@ public static class Cli
         };
         await Repl.RunAsync(state);
         return 0;
+    }
+
+    /// <summary>估算当前上下文用量(system prompt + 消息历史)。</summary>
+    internal static int EstimateContext(CoderConfig cfg, AgentLoop agent)
+    {
+        var sys = Tokens.Estimate(agent.GetSystemPrompt());
+        var msgs = agent.GetMessages();
+        return sys + msgs.Sum(Tokens.EstimateMessage);
     }
 
     internal static void RefreshProvider(CoderConfig cfg, AgentLoop agent)
