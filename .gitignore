@@ -1,0 +1,42 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# archive（历史归档，不进版本库）
+archive/
+
+# Node (legacy TypeScript implementation under archive/)
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.bun-build
+
+# logs & env
+*.log
+.env
+.env.local
+.env.*.local
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# local config & caches
+coverage/
+.nyc_output/
+.cache/
+config.local.json
+config.local.yaml
+coder.config.local.*
+.mavis-trash/
+
+# agent workspace notes (local tooling, not project content)
+.workbuddy/
