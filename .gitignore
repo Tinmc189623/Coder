@@ -55,6 +55,7 @@ tests/*.py
 
 # installer payload (copied from dist/publish at build time)
 installer/payload/
+installer-winui3/payload/
 
 # code-signing certificate material — never commit, even if dist/ rules change
 *.pfx
