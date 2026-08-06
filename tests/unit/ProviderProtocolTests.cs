@@ -134,8 +134,8 @@ public class ProviderProtocolTests
 
         // system 必须变成 block 数组并挂 cache_control
         var sysBlocks = body["system"] as List<object?>;
-        Assert.True(sysBlocks != null && sysBlocks.Count > 0, "system must be a block array for caching");
-        var sysBlock = sysBlocks[0] as Dictionary<string, object?>;
+        Assert.True(sysBlocks is { Count: > 0 }, "system must be a block array for caching");
+        var sysBlock = sysBlocks![0] as Dictionary<string, object?>;
         Assert.True(sysBlock != null && sysBlock.ContainsKey("cache_control"), "system block must carry cache_control");
 
         // 工具列表末项挂 cache_control
