@@ -120,7 +120,7 @@ public sealed class MainForm : Form
             Cursor = Cursors.Hand,
         };
         _primaryButton.FlatAppearance.BorderSize = 0;
-        _primaryButton.Click += async (_, _) => await RunCoreAsync();
+        _primaryButton.Click += OnPrimaryClick;
         Controls.Add(_primaryButton);
 
         _secondaryButton = new Button
@@ -152,6 +152,13 @@ public sealed class MainForm : Form
         Controls.Add(footer);
     }
 
+    /// <summary>主按钮点击:完成态关闭窗口,否则执行安装/卸载。</summary>
+    private async void OnPrimaryClick(object? sender, EventArgs e)
+    {
+        if (_completed) { Close(); return; }
+        await RunCoreAsync();
+    }
+
     /// <summary>执行安装/卸载,期间禁用按钮、显示进度条。</summary>
     private async Task RunCoreAsync()
     {
@@ -159,11 +166,11 @@ public sealed class MainForm : Form
         try
         {
             await Task.Run(_uninstallMode ? _engine.Uninstall : _engine.Install);
+            _completed = true;
             _statusLabel.Text = _uninstallMode ? "卸载完成。" : "安装完成,在任意终端运行 `coder` 即可使用。";
             _primaryButton.Text = "关闭";
-            _primaryButton.Click -= async (_, _) => await RunCoreAsync();
-            _primaryButton.Click += (_, _) => Close();
-            _secondaryButton.Visible = false;   // 完成态只保留"关闭"
+            _primaryButton.Enabled = true;       // 恢复可用,点击走 OnPrimaryClick -> Close
+            _secondaryButton.Visible = false;    // 完成态只保留"关闭"
         }
         catch (Exception ex)
         {
@@ -174,6 +181,8 @@ public sealed class MainForm : Form
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
+
+    private bool _completed;
 
     private void SetBusy(bool busy)
     {
