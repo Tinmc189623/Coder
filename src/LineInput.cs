@@ -51,9 +51,8 @@ public static class LineInput
                         var completed = Complete(sb.ToString(), commandNames);
                         if (completed != null)
                         {
-                            ClearLine(prompt, sb.Length, cursor);
                             sb.Clear(); sb.Append(completed); cursor = sb.Length;
-                            Console.Out.Write(sb.ToString());
+                            Redraw(prompt, sb, cursor);
                         }
                     }
                     continue;
@@ -73,7 +72,7 @@ public static class LineInput
                 }
                 if (key.Key == ConsoleKey.Backspace)
                 {
-                    if (cursor > 0) { sb.Remove(cursor - 1, 1); cursor--; Refresh(prompt, sb, cursor); }
+                    if (cursor > 0) { sb.Remove(cursor - 1, 1); cursor--; Redraw(prompt, sb, cursor); }
                     continue;
                 }
                 if (key.Key == ConsoleKey.LeftArrow) { if (cursor > 0) { cursor--; Console.Out.Write("\x1b[D"); } continue; }
@@ -82,7 +81,7 @@ public static class LineInput
                 if (key.Key == ConsoleKey.End) { cursor = sb.Length; Console.Out.Write("\x1b[F"); continue; }
                 if (key.Key == ConsoleKey.Delete)
                 {
-                    if (cursor < sb.Length) { sb.Remove(cursor, 1); Refresh(prompt, sb, cursor); }
+                    if (cursor < sb.Length) { sb.Remove(cursor, 1); Redraw(prompt, sb, cursor); }
                     continue;
                 }
                 if (key.KeyChar == '\u0000' || key.KeyChar == '\u0003') { cancelled = true; break; } // Ctrl+C already handled by handler; ignore NUL
@@ -90,7 +89,7 @@ public static class LineInput
                 {
                     sb.Insert(cursor, key.KeyChar);
                     cursor++;
-                    Refresh(prompt, sb, cursor);
+                    Redraw(prompt, sb, cursor);
                 }
             }
 
@@ -158,27 +157,24 @@ public static class LineInput
     }
 
     // ── cursor helpers ───────────────────────────────────────────────────────
-    private static void Refresh(string prompt, StringBuilder sb, int cursor)
+    /// <summary>
+    /// 整行重绘:回行首 → 清整行 → 重画 prompt + 内容 → 光标定位回逻辑位置。
+    /// 用 \x1b[2K 清整行而非 \x1b[K 清到行尾——插入/删除字符后终端光标不在行尾,
+    /// 后者会残留前半段字符导致重复输入(ls → lls)。
+    /// </summary>
+    private static void Redraw(string prompt, StringBuilder sb, int cursor)
     {
-        // Redraw the whole current line from the prompt.
-        ClearLine(prompt, sb.Length, cursor);
+        Console.Out.Write("\r\x1b[2K");
+        Console.Out.Write(prompt);
         Console.Out.Write(sb.ToString());
-        // Move cursor back to its logical position.
         var back = sb.Length - cursor;
         if (back > 0) Console.Out.Write($"\x1b[{back}D");
-    }
-
-    private static void ClearLine(string prompt, int len, int cursor)
-    {
-        var back = len - cursor;
-        if (back > 0) Console.Out.Write($"\x1b[{back}D");
-        Console.Out.Write("\x1b[K");
+        Console.Out.Flush();
     }
 
     private static void ReplaceLine(string prompt, StringBuilder old, int oldCursor, string replacement, ref StringBuilder sb, ref int cursor)
     {
-        ClearLine(prompt, old.Length, oldCursor);
         sb.Clear(); sb.Append(replacement); cursor = sb.Length;
-        Console.Out.Write(sb.ToString());
+        Redraw(prompt, sb, cursor);
     }
 }
