@@ -4,14 +4,14 @@
 
 **production-grade AI coding agent for the terminal** — written in **C# / .NET 11**
 
-![Version](https://img.shields.io/badge/version-0.2.2-af87ff?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.2.3-af87ff?style=flat-square)
 ![.NET](https://img.shields.io/badge/.NET-11-00d7ff?style=flat-square)
 ![License](https://img.shields.io/badge/license-Apache%202.0-ffaf00?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows-af87ff?style=flat-square)
 ![Language](https://img.shields.io/badge/language-C%23-00d7ff?style=flat-square)
 
 ```
-◆ Coder CLI  v0.2.2  ·  anthropic/claude-sonnet-4-5
+◆ Coder CLI  v0.2.3  ·  anthropic/claude-sonnet-4-5
 production-grade AI coding agent for the terminal
 ```
 

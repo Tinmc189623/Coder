@@ -41,8 +41,9 @@ coder.config.local.*
 # agent workspace notes (local tooling, not project content)
 .workbuddy/
 
-# local Claude Code guidance (per-machine, not project content)
+# local Claude Code guidance & runtime state (per-machine, not project content)
 CLAUDE.md
+.claude/
 
 # smoke suite (internal tooling, not shipped with the repo)
 tests/*.py
