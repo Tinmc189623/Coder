@@ -22,12 +22,13 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
 
-  <!-- 发布产物作为嵌入资源随安装器一起分发 -->
+  <!-- 发布产物作为嵌入资源随安装器一起分发(Tomlyn.dll 是配置解析的运行时依赖,必须带上) -->
   <ItemGroup>
     <EmbeddedResource Include="payload\coder.exe" LogicalName="payload.coder.exe" />
     <EmbeddedResource Include="payload\coder.dll" LogicalName="payload.coder.dll" />
     <EmbeddedResource Include="payload\coder.deps.json" LogicalName="payload.coder.deps.json" />
     <EmbeddedResource Include="payload\coder.runtimeconfig.json" LogicalName="payload.coder.runtimeconfig.json" />
+    <EmbeddedResource Include="payload\Tomlyn.dll" LogicalName="payload.Tomlyn.dll" />
   </ItemGroup>
 
 </Project>

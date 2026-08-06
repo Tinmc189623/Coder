@@ -10,10 +10,15 @@ archive/
 
 # Node (legacy TypeScript implementation under archive/)
 node_modules/
-dist/
 build/
 *.tsbuildinfo
 .bun-build
+
+# release staging (never committed):
+#   dist/artifacts  — final deliverables (msix / installer / cert)
+#   dist/notes      — release notes
+#   dist/work       — intermediate build output
+dist/
 
 # logs & env
 *.log

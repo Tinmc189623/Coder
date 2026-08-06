@@ -36,7 +36,7 @@ public sealed class InstallEngine
 
         Directory.CreateDirectory(installDir);
         var asm = Assembly.GetExecutingAssembly();
-        var payload = new[] { ExeName, "coder.dll", "coder.deps.json", "coder.runtimeconfig.json" };
+        var payload = new[] { ExeName, "coder.dll", "coder.deps.json", "coder.runtimeconfig.json", "Tomlyn.dll" };
         for (int i = 0; i < payload.Length; i++)
         {
             _progress($"正在解压 {payload[i]} …", 10 + (i * 15));
