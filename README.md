@@ -1,14 +1,25 @@
-# Coder CLI
+<div align="center">
 
-A production-grade AI coding agent for the terminal, written in **C# / .NET 11**.
+# ◆ Coder CLI
+
+**production-grade AI coding agent for the terminal** — written in **C# / .NET 11**
+
+![Version](https://img.shields.io/badge/version-0.2.2-af87ff?style=flat-square)
+![.NET](https://img.shields.io/badge/.NET-11-00d7ff?style=flat-square)
+![License](https://img.shields.io/badge/license-Apache%202.0-ffaf00?style=flat-square)
+![Platform](https://img.shields.io/badge/platform-Windows-af87ff?style=flat-square)
+![Language](https://img.shields.io/badge/language-C%23-00d7ff?style=flat-square)
 
 ```
-◆ Coder CLI  v0.2.1  ·  anthropic/claude-sonnet-4-5
+◆ Coder CLI  v0.2.2  ·  anthropic/claude-sonnet-4-5
 production-grade AI coding agent for the terminal
 ```
 
-(The banner renders the real version and the configured provider/model at
-runtime — see `Brand.Version` and `Banner.Render` in `src/Ui.cs`.)
+</div>
+
+(The banner above is a rendered example — the real banner shows the runtime
+version from `Brand.Version` and the configured provider/model, see
+`Banner.Render` in `src/Ui.cs`.)
 
 ## Repository layout
 
@@ -16,7 +27,7 @@ runtime — see `Brand.Version` and `Banner.Render` in `src/Ui.cs`.)
 |------|------------|
 | `Coder.csproj` | The project file (root-level) |
 | `src/` | C# sources — 27 files, namespaces `Coder.{Cli,Core,Providers,Tools,Ui,Config,Skills,Memory,…}` |
-| `tests/` | Smoke suite (mock LLM server + scenario driver, see `run_smoke.py`) and `tests/unit/` — a C# test project (reflection-based runner, no xUnit) |
+| `tests/unit/` | C# test project (reflection-based runner, no xUnit) |
 | `dist/` | Stale TypeScript build output from the superseded `archive/coder-ts/` tree — not part of the .NET build |
 | `archive/coder-ts/` | The original TypeScript/Node implementation (superseded, kept for reference) |
 | `archive/web/` | The legacy local web server / Web UI, dropped from the CLI-first design |
@@ -100,15 +111,8 @@ UI language: `en` and `zh-CN`.
 ## Tests
 
 ```bash
-dotnet build && python tests/run_smoke.py     # end-to-end smoke suite
 dotnet run --project tests/unit               # C# unit tests (reflection runner)
 ```
-
-The smoke suite spins up a mock LLM server and drives the real CLI binary end to
-end across four scenarios — OpenAI and Anthropic dialects × streaming and
-non-streaming — asserting request shape (system prompt, tool schemas, model), the
-full read → write → answer tool loop, actual file side effects, and history
-accumulation.
 
 The unit project (`tests/unit/`) compiles the production `src/` tree verbatim
 (minus `Program.cs`) and runs `[Test]` methods on the real implementations via a
@@ -116,7 +120,15 @@ small reflection-based runner — no mocking framework, no external test SDK. It
 covers file editing, glob, permissions, SSE parsing, text formatting, themes and
 token counting.
 
+The end-to-end smoke suite (mock LLM server + scenario driver) is internal
+tooling and does not ship with the repository.
+
 ## License
 
-Copyright © 2026 Nexsteaduser. All Rights Reserved. Released under the
-[Apache License 2.0](LICENSE).
+<div align="center">
+
+Copyright © 2026 **Nexsteaduser**. All Rights Reserved.
+
+Released under the [Apache License 2.0](LICENSE) · Contact: `admin@nexsteaduser.com`
+
+</div>

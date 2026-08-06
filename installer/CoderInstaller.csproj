@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Coder.Installer</RootNamespace>
+    <AssemblyName>coder-setup</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <AssemblyTitle>Coder CLI Installer</AssemblyTitle>
+    <AssemblyDescription>Coder CLI — one-click installer (Nexsteaduser)</AssemblyDescription>
+    <Version>0.2.2</Version>
+    <Authors>Nexsteaduser</Authors>
+    <Company>Nexsteaduser</Company>
+    <Copyright>Copyright © 2026 Nexsteaduser. All Rights Reserved.</Copyright>
+    <ApplicationIcon>..\logo.ico</ApplicationIcon>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <!-- 发布产物作为嵌入资源随安装器一起分发 -->
+  <ItemGroup>
+    <EmbeddedResource Include="payload\coder.exe" LogicalName="payload.coder.exe" />
+    <EmbeddedResource Include="payload\coder.dll" LogicalName="payload.coder.dll" />
+    <EmbeddedResource Include="payload\coder.deps.json" LogicalName="payload.coder.deps.json" />
+    <EmbeddedResource Include="payload\coder.runtimeconfig.json" LogicalName="payload.coder.runtimeconfig.json" />
+  </ItemGroup>
+
+</Project>

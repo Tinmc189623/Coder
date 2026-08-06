@@ -11,7 +11,8 @@
     <InvariantGlobalization>false</InvariantGlobalization>
     <AssemblyTitle>Coder CLI</AssemblyTitle>
     <AssemblyDescription>Coder CLI — production-grade AI coding agent for the terminal (.NET 11)</AssemblyDescription>
-    <Version>0.2.1</Version>
+    <ApplicationIcon>logo.ico</ApplicationIcon>
+    <Version>0.2.2</Version>
     <Authors>Nexsteaduser</Authors>
     <Company>Nexsteaduser</Company>
     <Copyright>Copyright © 2026 Nexsteaduser. All Rights Reserved.</Copyright>
