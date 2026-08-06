@@ -1,15 +1,17 @@
 // Coder CLI (.NET 11 port) — config loader.
 // Reads (highest priority first):
 //   1. CLI flags                 (--api-key, --base-url, --model, --provider, --cwd)
-//   2. Environment variables     (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, …)
-//   3. Project config            (./coder-cli.config.json)        — optional
-//   4. User config               (~/.coder-cli/config.json)        — optional
-// Ported from src/config/loader.ts.
+//   2. Project config            (./.coder/settings.toml)          — optional
+//   3. User config               (~/.coder/settings.toml)          — optional
+//   4. Environment variables     (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, …) — fallback only
+// Ported from src/config/loader.ts (JSON → TOML).
 
 using Coder.Localization;
 using Coder.Providers;
 using Coder.Types;
 using Coder.Utils;
+using Tomlyn;
+using Tomlyn.Model;
 
 namespace Coder.Config;
 
@@ -25,22 +27,6 @@ public sealed class CliOverrides
     public EffortLevel? EffortLevel;
     public string? Lang;
     public bool? StreamOutput;
-}
-
-public sealed class UserConfigFile
-{
-    public string? Schema { get; set; }
-    public bool Initialized { get; set; } = true;
-    public string? Lang { get; set; }
-    public object? CnMode { get; set; }
-    public string? Provider { get; set; }
-    public string? Model { get; set; }
-    public ThemeMode? Theme { get; set; }
-    public EffortLevel? EffortLevel { get; set; }
-    public PermissionMode? PermissionMode { get; set; }
-    public int? ContextWindow { get; set; }
-    public bool? StreamOutput { get; set; }
-    public Dictionary<string, string>? Env { get; set; }
 }
 
 public sealed class ConfigLayer
@@ -83,12 +69,12 @@ public static class ConfigLoader
     {
         var over = Environment.GetEnvironmentVariable("CODER_USER_CONFIG_DIR");
         if (!string.IsNullOrEmpty(over)) return over;
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".coder-cli");
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".coder");
     }
 
     public static void PreloadUserConfigEnv()
     {
-        var file = Path.Combine(DefaultUserConfigDir(), "config.json");
+        var file = Path.Combine(DefaultUserConfigDir(), "settings.toml");
         var layer = TryReadConfig(file);
         if (layer != null) ApplyEnvBlock(layer.Data);
     }
@@ -96,6 +82,18 @@ public static class ConfigLoader
     public static (CoderConfig config, List<ConfigLayer> layers) LoadConfig(CliOverrides cli, string cwd, string? userConfigDir = null)
     {
         var layers = new List<ConfigLayer>();
+
+        // 层序 [user, project, cli],flat merge last-wins => CLI flags 最高、项目次之、用户兜底。
+        var cfgDir = userConfigDir ?? DefaultUserConfigDir();
+        var userCfg = TryReadConfig(Path.Combine(cfgDir, "settings.toml"));
+        if (userCfg != null)
+        {
+            layers.Add(userCfg);
+            ApplyEnvBlock(userCfg.Data);
+        }
+
+        var projectCfg = TryReadConfig(Path.Combine(cwd, ".coder", "settings.toml"));
+        if (projectCfg != null) layers.Add(projectCfg);
 
         var cliData = new Dictionary<string, object?>();
         if (cli.Provider != null) cliData["provider"] = cli.Provider;
@@ -109,17 +107,6 @@ public static class ConfigLoader
         if (cli.Lang != null) cliData["lang"] = cli.Lang;
         if (cli.StreamOutput != null) cliData["streamOutput"] = cli.StreamOutput.Value;
         layers.Add(new ConfigLayer { Source = "cli", Data = cliData });
-
-        var cfgDir = userConfigDir ?? DefaultUserConfigDir();
-        var userCfg = TryReadConfig(Path.Combine(cfgDir, "config.json"));
-        if (userCfg != null)
-        {
-            layers.Add(userCfg);
-            ApplyEnvBlock(userCfg.Data);
-        }
-
-        var projectCfg = TryReadConfig(Path.Combine(cwd, "coder-cli.config.json"));
-        if (projectCfg != null) layers.Add(projectCfg);
 
         var merged = new Dictionary<string, object?>();
         foreach (var l in layers)
@@ -282,6 +269,7 @@ public static class ConfigLoader
         if (merged.TryGetValue("contextWindow", out var cw))
         {
             if (cw is int i) return i;
+            if (cw is long l && l > 0 && l <= int.MaxValue) return (int)l;   // TOML 整数是 long
             if (cw is string s && int.TryParse(s, out var pi)) return pi;
         }
         var fromEnv = EnvOrNull(ConfigEnv.ContextWindow);
@@ -317,41 +305,37 @@ public static class ConfigLoader
         if (!File.Exists(file)) return null;
         try
         {
-            var json = File.ReadAllText(file);
-            var data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(json);
-            if (data == null) return null;
-            return new ConfigLayer { Source = file, Data = data };
+            var doc = Toml.Parse(File.ReadAllText(file), file);
+            if (doc.HasErrors)
+                throw new ConfigError($"Failed to parse {file}: " +
+                    string.Join("; ", doc.Diagnostics.Select(d => d.Message).Take(3)));
+            return new ConfigLayer { Source = file, Data = TomlToData(doc.ToModel()) };
         }
+        catch (ConfigError) { throw; }
         catch (Exception e)
         {
             throw new ConfigError($"Failed to parse {file}: {e.Message}");
         }
     }
 
-    public static void ReconcileUserConfigEnv(CoderConfig cfg)
+    /// <summary>把 Tomlyn 的 TomlTable 递归深转为纯 CLR 字典/列表,Tomlyn 类型只存在于本文件。</summary>
+    internal static Dictionary<string, object?> TomlToData(TomlTable table)
     {
-        var file = Path.Combine(cfg.UserConfigDir, "config.json");
-        if (!File.Exists(file)) return;
-        ConfigLayer? layer = TryReadConfig(file);
-        if (layer == null) return;
-        var data = layer.Data;
-        if (!data.TryGetValue("env", out var envObj) || envObj is not Dictionary<string, object?> env)
-        {
-            env = new Dictionary<string, object?>();
-            data["env"] = env;
-        }
-        bool changed = false;
-        if (GetEnv(env, ConfigEnv.Provider) != cfg.Provider) { env[ConfigEnv.Provider] = cfg.Provider; changed = true; }
-        var ctx = cfg.ContextWindow.ToString();
-        if (GetEnv(env, ConfigEnv.ContextWindow) != ctx) { env[ConfigEnv.ContextWindow] = ctx; changed = true; }
-        if (data.TryGetValue("provider", out var dp) && (dp?.ToString() ?? "") != cfg.Provider) { data["provider"] = cfg.Provider; changed = true; }
-        if (!changed) return;
-        var json = System.Text.Json.JsonSerializer.Serialize(data, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(file, json);
-        Log.Instance.Debug($"reconcileUserConfigEnv: updated {file}");
+        var d = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var kv in table) d[kv.Key] = Normalize(kv.Value);
+        return d;
     }
 
-    private static string? GetEnv(Dictionary<string, object?> env, string key) => env.TryGetValue(key, out var v) ? v?.ToString() : null;
+    internal static object? Normalize(object? v) => v switch
+    {
+        TomlTable t => TomlToData(t),
+        TomlTableArray ta => ta.Select(Normalize).ToList(),   // [[hooks.X]] array-of-tables
+        TomlArray a => a.Select(Normalize).ToList(),
+        _ => v, // string / bool / long / double / DateTime 原样
+    };
+
+    /// <summary>测试辅助:TomlTable → 纯 CLR 字典。</summary>
+    internal static Dictionary<string, object?> ToDataForTest(TomlTable table) => TomlToData(table);
 
     public static string InferProvider(string? baseUrl, string? envProvider)
     {

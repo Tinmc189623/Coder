@@ -37,15 +37,34 @@ public static class SubAgent
 
     public static string[] Types => ToolNames.Keys.ToArray();
 
+    /// <summary>内置类型 + 文件模板名合并去重(Task 工具 schema 用)。</summary>
+    public static string[] AllTypes(IReadOnlyList<Coder.Agents.AgentTemplate>? templates)
+        => templates is { Count: > 0 }
+            ? ToolNames.Keys.Concat(templates.Select(t => t.Name)).Distinct().ToArray()
+            : ToolNames.Keys.ToArray();
+
     public static async Task<SubAgentResult> RunAsync(
         CoderConfig config,
         ToolRegistry parentRegistry,
         string prompt,
         string subagentType,
         string? modelOverride = null,
-        Action<string>? onToolTrace = null)
+        Action<string>? onToolTrace = null,
+        IReadOnlyList<Coder.Agents.AgentTemplate>? templates = null,
+        HookManager? hookManager = null)
     {
-        var allowed = ToolNames.TryGetValue(subagentType, out var a) ? a : ToolNames["general-purpose"];
+        // 三级降级:模板 Tools → 内置白名单 → general-purpose。
+        var template = templates?.FirstOrDefault(t => t.Name.Equals(subagentType, StringComparison.OrdinalIgnoreCase));
+        string[] allowed;
+        if (template?.Tools is { Length: > 0 } tTools)
+            allowed = tTools;
+        else if (ToolNames.TryGetValue(subagentType, out var a))
+            allowed = a;
+        else
+        {
+            if (template == null) Log.Instance.Warn($"subagent type '{subagentType}' not found, falling back to general-purpose");
+            allowed = ToolNames["general-purpose"];
+        }
 
         // Build a restricted registry by re-using the parent's handlers.
         var registry = new ToolRegistry();
@@ -69,7 +88,10 @@ public static class SubAgent
             return new SubAgentResult($"Subagent ({subagentType}) could not start: {e.Message}", 0, 0);
         }
 
-        var cfg = config with { Model = modelOverride ?? (string.IsNullOrEmpty(config.SubagentModel) ? config.Model : config.SubagentModel) };
+        // 模型优先级:模板 Model → 调用级 modelOverride → SubagentModel 配置。
+        var model = template?.Model ?? modelOverride
+            ?? (string.IsNullOrEmpty(config.SubagentModel) ? config.Model : config.SubagentModel);
+        var cfg = config with { Model = model };
 
         // Subagents auto-allow: the parent already gated the Task invocation.
         var permEngine = new PermissionEngine((_, _) =>
@@ -79,8 +101,9 @@ public static class SubAgent
         var hooks = new SilentAgentHooks(onToolTrace);
         var loop = new AgentLoop(
             cfg, provider, registry, permEngine, hooks,
-            systemPrompt: Config.SystemPrompt.Build(cfg),
-            sessionContext: Config.RuntimeContext.BuildSessionContext(cfg, "", ""));
+            systemPrompt: template?.Body ?? Config.SystemPrompt.Build(cfg),
+            sessionContext: Config.RuntimeContext.BuildSessionContext(cfg, "", ""),
+            hookManager: hookManager);   // 子代理内工具调用同样过 hook
 
         try
         {

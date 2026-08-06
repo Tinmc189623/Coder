@@ -161,21 +161,23 @@ public static class SystemPrompt
     private static string Join(params string[] lines) => string.Join("\n", lines);
 }
 
-// ── Project context ─────────────────────────────────────────────────────────
+// ── Project & global rules ──────────────────────────────────────────────────
 public sealed class ProjectContextInfo
 {
     public string? AgentsFile { get; set; }
     public string? AgentsBody { get; set; }
+    public string? GlobalFile { get; set; }
+    public string? GlobalBody { get; set; }
     public string? ReadmeBody { get; set; }
     public List<string> FilesFound { get; } = new();
 }
 
 public static class ProjectContextLoader
 {
-    private static readonly string[] ProjectDocs = { "AGENTS.md", "CLAUDE.md", "README.md" };
-    private const string LegacyAgentRules = "CLAUDE.md";
+    // 项目规则优先级:CODER.md > CLAUDE.md > AGENTS.md > AGENT.md,README.md 兜底。
+    private static readonly string[] ProjectDocs = { "CODER.md", "CLAUDE.md", "AGENTS.md", "AGENT.md", "README.md" };
 
-    public static async Task<ProjectContextInfo> LoadAsync(string cwd)
+    public static async Task<ProjectContextInfo> LoadAsync(string cwd, string userConfigDir)
     {
         var ctx = new ProjectContextInfo();
         foreach (var name in ProjectDocs)
@@ -186,24 +188,38 @@ public static class ProjectContextLoader
             {
                 var body = await File.ReadAllTextAsync(full);
                 ctx.FilesFound.Add(name);
-                if (name is "AGENTS.md" or LegacyAgentRules)
+                if (name == "README.md")
                 {
-                    if (ctx.AgentsFile == null) { ctx.AgentsFile = full; ctx.AgentsBody = body; }
+                    if (ctx.ReadmeBody == null) ctx.ReadmeBody = body;
                 }
-                else if (name == "README.md" && ctx.ReadmeBody == null)
+                else if (ctx.AgentsFile == null)   // 首个规则文件生效
                 {
-                    ctx.ReadmeBody = body;
+                    ctx.AgentsFile = full;
+                    ctx.AgentsBody = body;
                 }
             }
+            catch { /* skip unreadable */ }
+        }
+        // 全局规则 ~/.coder/CODER.md。
+        var globalFile = System.IO.Path.Combine(userConfigDir, "CODER.md");
+        if (File.Exists(globalFile))
+        {
+            try { ctx.GlobalFile = globalFile; ctx.GlobalBody = await File.ReadAllTextAsync(globalFile); }
             catch { /* skip unreadable */ }
         }
         return ctx;
     }
 
-    /// <summary>Render the project context into a compact text block for the session prompt.</summary>
+    /// <summary>Render rules into a compact text block:全局规则在前,项目规则在后(冲突时项目覆盖)。</summary>
     public static string Render(ProjectContextInfo ctx, int maxChars = 8000)
     {
         var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(ctx.GlobalBody))
+        {
+            sb.AppendLine($"# {System.IO.Path.GetFileName(ctx.GlobalFile)}");
+            sb.AppendLine(Truncate(ctx.GlobalBody!.Trim(), Math.Min(maxChars, 4000)));
+            sb.AppendLine();
+        }
         if (!string.IsNullOrWhiteSpace(ctx.AgentsBody))
         {
             sb.AppendLine($"# {System.IO.Path.GetFileName(ctx.AgentsFile)}");

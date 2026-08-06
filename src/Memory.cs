@@ -27,8 +27,8 @@ public sealed class MemoryStore
     public MemoryStore(string userConfigDir, string projectRoot)
     {
         _userDir = Path.Combine(userConfigDir, "memory");
-        _agentDir = Path.Combine(userConfigDir, "agents", "coder-cli", "memory");
-        _projectDir = Path.Combine(projectRoot, ".coder-cli", "memory");
+        _agentDir = Path.Combine(userConfigDir, "agents", "coder", "memory");
+        _projectDir = Path.Combine(projectRoot, ".coder", "memory");
     }
 
     public string DirFor(MemoryScope scope) => scope switch

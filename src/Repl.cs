@@ -24,6 +24,7 @@ public sealed class ReplState
     public required ToolRegistry Registry { get; init; }
     public required PermissionEngine PermEngine { get; init; }
     public SkillLoader? SkillLoader { get; set; }
+    public HookManager? HookManager { get; set; }
     public string SystemText { get; set; } = "";
     public string ProjectContext { get; set; } = "";
     public string SkillList { get; set; } = "";
@@ -60,7 +61,7 @@ public static class SlashCommands
         new("/compact", "", "压缩上下文，保留近期轮次", "compact context, keep recent turns"),
         new("/skills", "[list|load|install]", "技能：列出 / 加载 / 安装", "skills: list, load, install"),
         new("/memory", "[list|read|write]", "长期记忆：列出 / 读取 / 写入", "memory: list, read, write"),
-        new("/init", "", "生成 AGENTS.md 项目说明", "generate AGENTS.md project guide"),
+        new("/init", "", "生成 CODER.md 项目规则", "generate CODER.md project rules"),
         new("/cwd", "[path]", "查看或切换工作目录", "show or change working directory"),
         new("/exit", "", "退出", "exit"),
     };
@@ -473,8 +474,8 @@ public static class SlashCommands
     // ── /init ───────────────────────────────────────────────────────────────
     private static async Task InitAsync(ReplState st)
     {
-        var target = Path.Combine(st.Config.Cwd, "AGENTS.md");
-        if (File.Exists(target) && !Prompter.Confirm($"AGENTS.md 已存在，覆盖?", false))
+        var target = Path.Combine(st.Config.Cwd, "CODER.md");
+        if (File.Exists(target) && !Prompter.Confirm($"CODER.md 已存在，覆盖?", false))
         {
             Console.Out.WriteLine(Theme.Dim("已取消"));
             return;
@@ -484,7 +485,7 @@ public static class SlashCommands
             var written = await InitCommand.GenerateAgentsAsync(st.Config,
                 info => Console.Out.WriteLine(Theme.Dim("  " + info)));
             Console.Out.WriteLine(Theme.Success("✓ ") + Theme.Dim($"已生成 {written}"));
-            var ctx = await ProjectContextLoader.LoadAsync(st.Config.Cwd);
+            var ctx = await ProjectContextLoader.LoadAsync(st.Config.Cwd, st.Config.UserConfigDir);
             st.ProjectContext = ProjectContextLoader.Render(ctx);
             st.RebuildPrompts();
         }
@@ -521,6 +522,18 @@ public static class Repl
                 continue;
             }
 
+            // UserPromptSubmit hook:block 拦截本轮,additionalContext 追加到 prompt。
+            if (st.HookManager != null)
+            {
+                var pd = await st.HookManager.UserPromptSubmitAsync(input);
+                if (pd.Block)
+                {
+                    Console.Out.WriteLine(Theme.Dim(pd.Reason ?? "Prompt blocked by hook"));
+                    continue;
+                }
+                if (!string.IsNullOrEmpty(pd.AdditionalContext)) input += "\n\n" + pd.AdditionalContext;
+            }
+
             Cli.RefreshProvider(cfg, st.Agent);
             st.Renderer.BeginTurn();
             try
@@ -535,6 +548,10 @@ public static class Repl
             AutoCompact(st);
         }
 
+        if (st.HookManager != null)
+        {
+            try { await st.HookManager.StopAsync(); } catch { }
+        }
         Console.Out.WriteLine("\n" + Theme.Dim(I18n.T("repl.exit.bye")));
     }
 

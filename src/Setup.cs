@@ -1,13 +1,14 @@
-// Coder CLI (.NET 11 port) — first-run setup wizard.
-// Runs only when ~/.coder-cli/config.json is missing and stdin is a TTY.
+// Coder CLI (.NET 11 port) — first-run setup wizard + legacy config migration.
+// Runs only when ~/.coder/settings.toml is missing and stdin is a TTY.
 // Collects language, theme, and optional API key — never blocks on API key.
-// Ported from src/config/setup.ts.
 
+using System.Text;
 using System.Text.Json;
 using Coder.Localization;
 using Coder.Providers;
 using Coder.Types;
 using Coder.Ui;
+using Coder.Utils;
 
 namespace Coder.Config;
 
@@ -15,12 +16,76 @@ public sealed record FirstRunResult(string Lang, ThemeMode Theme, string Provide
 
 public static class Setup
 {
-    /// <summary>True when the user-level config file already exists.</summary>
+    /// <summary>True when the user-level settings.toml already exists.</summary>
     public static bool UserConfigExists()
-        => File.Exists(Path.Combine(ConfigLoader.DefaultUserConfigDir(), "config.json"));
+        => File.Exists(Path.Combine(ConfigLoader.DefaultUserConfigDir(), "settings.toml"));
 
     /// <summary>Should the wizard run? Only on a TTY with no existing config.</summary>
     public static bool ShouldRun() => !UserConfigExists() && Terminal.IsInteractive();
+
+    /// <summary>
+    /// 一次性迁移旧 JSON 配置(~/.coder-cli/config.json → ~/.coder/settings.toml)。
+    /// 目标 settings.toml 已存在或旧文件不存在时不做任何事;旧文件保留不删除。
+    /// </summary>
+    public static bool MigrateLegacyIfPresent()
+    {
+        var target = Path.Combine(ConfigLoader.DefaultUserConfigDir(), "settings.toml");
+        if (File.Exists(target)) return false;
+        // 旧目录 ~/.coder-cli 与新目录 ~/.coder 共享同一 home:从新目录父级推导。
+        var newDir = ConfigLoader.DefaultUserConfigDir();
+        var home = Path.GetDirectoryName(newDir.TrimEnd(Path.DirectorySeparatorChar)) ?? newDir;
+        var legacy = Path.Combine(home, ".coder-cli", "config.json");
+        if (!File.Exists(legacy)) return false;
+        try
+        {
+            var data = JsonSerializer.Deserialize<Dictionary<string, object?>>(File.ReadAllText(legacy));
+            if (data == null) return false;
+            var sb = new StringBuilder();
+            foreach (var key in new[] { "lang", "provider", "model" })
+            {
+                if (data.TryGetValue(key, out var v) && v is JsonElement je && je.ValueKind == JsonValueKind.String)
+                {
+                    var s = je.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) sb.AppendLine($"{key} = \"{EscapeToml(s)}\"");
+                }
+            }
+            // 枚举数字映射:theme 0=auto/1=dark/2=light;effortLevel 0=low..4=max。
+            if (data.TryGetValue("theme", out var th) && th is JsonElement thEl && thEl.ValueKind == JsonValueKind.Number)
+                sb.AppendLine($"theme = \"{ThemeName(thEl.GetInt32())}\"");
+            if (data.TryGetValue("effortLevel", out var ef) && ef is JsonElement efEl && efEl.ValueKind == JsonValueKind.Number)
+                sb.AppendLine($"effortLevel = \"{EffortName(efEl.GetInt32())}\"");
+            if (data.TryGetValue("contextWindow", out var cw) && cw is JsonElement cwEl && cwEl.ValueKind == JsonValueKind.Number)
+                sb.AppendLine($"contextWindow = {cwEl.GetInt32()}");
+            if (data.TryGetValue("cnMode", out var cm))
+            {
+                bool cn = cm is JsonElement cmEl && (cmEl.ValueKind == JsonValueKind.True
+                    || (cmEl.ValueKind == JsonValueKind.String && cmEl.GetString() == "True"));
+                sb.AppendLine($"cnMode = {(cn ? "true" : "false")}");
+            }
+            if (data.TryGetValue("env", out var e) && e is JsonElement env && env.ValueKind == JsonValueKind.Object)
+            {
+                sb.AppendLine();
+                sb.AppendLine("[env]");
+                foreach (var p in env.EnumerateObject())
+                    sb.AppendLine($"{p.Name} = \"{EscapeToml(p.Value.GetString() ?? p.Value.ToString())}\"");
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.WriteAllText(target, sb.ToString());
+            Log.Instance.Warn($"Migrated legacy config {legacy} → {target}");
+            Console.WriteLine(Theme.Dim(
+                "已检测到旧配置 ~/.coder-cli/config.json,已迁移至 ~/.coder/settings.toml(旧文件保留,可手动删除)。"));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Instance.Warn("legacy config migration failed:", ex.Message);
+            return false;
+        }
+    }
+
+    private static string ThemeName(int i) => i switch { 1 => "dark", 2 => "light", _ => "auto" };
+    private static string EffortName(int i) => i switch { 0 => "low", 1 => "medium", 2 => "high", 3 => "xhigh", _ => "max" };
+    private static string EscapeToml(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
     public static FirstRunResult Run()
     {
@@ -79,12 +144,12 @@ public static class Setup
         return new FirstRunResult(lang, themeValue, provider, apiKey, configPath);
     }
 
-    /// <summary>Persist first-run choices to ~/.coder-cli/config.json.</summary>
+    /// <summary>Persist first-run choices to ~/.coder/settings.toml。</summary>
     public static string WriteFirstRunConfig(string lang, ThemeMode theme, string provider, string? apiKey)
     {
         var dir = ConfigLoader.DefaultUserConfigDir();
         Directory.CreateDirectory(dir);
-        var file = Path.Combine(dir, "config.json");
+        var file = Path.Combine(dir, "settings.toml");
 
         var envKeys = ProviderRegistry.ApiKeyEnvVarsFor(provider);
         var envKey = envKeys.FirstOrDefault() ?? "ANTHROPIC_API_KEY";
@@ -93,40 +158,26 @@ public static class Setup
         var isMinimax = provider == "minimax";
         var isZh = lang == "zh-CN";
 
-        var env = new Dictionary<string, string>
-        {
-            ["CODER_CLI_LANG"] = lang,
-            ["LANGUAGE"] = lang,
-            ["CN_MODE"] = isZh ? "True" : "False",
-            [ContextWindow.EnvProvider] = provider,
-            [ContextWindow.EnvContextWindow] = contextWindow.ToString(),
-            ["API_TIMEOUT_MS"] = "30000",
-            ["C_DISABLE_NONESSENTIAL_TRAFFIC"] = "1",
-            ["CODER_CLI_EFFORT_LEVEL"] = isMinimax ? "max" : "high",
-        };
-        if (isMinimax) env[DeepOptimize.EnvDeepOptimize] = "1";
-        if (!string.IsNullOrEmpty(apiKey)) env[envKey] = apiKey!;
-
-        var data = new UserConfigFile
-        {
-            Schema = "",
-            Initialized = true,
-            Lang = lang,
-            CnMode = isZh,
-            Provider = provider,
-            Model = string.IsNullOrEmpty(model) ? null : model,
-            ContextWindow = contextWindow,
-            Theme = theme,
-            EffortLevel = isMinimax ? Types.EffortLevel.Max : Types.EffortLevel.High,
-            Env = env,
-        };
-
-        var json = JsonSerializer.Serialize(data, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-        });
-        File.WriteAllText(file, json + "\n");
+        var sb = new StringBuilder();
+        sb.AppendLine($"lang = \"{lang}\"");
+        sb.AppendLine($"theme = \"{theme.ToString().ToLowerInvariant()}\"");
+        sb.AppendLine($"provider = \"{provider}\"");
+        if (!string.IsNullOrEmpty(model)) sb.AppendLine($"model = \"{model}\"");
+        sb.AppendLine($"effortLevel = \"{(isMinimax ? "max" : "high")}\"");
+        sb.AppendLine($"contextWindow = {contextWindow}");
+        sb.AppendLine();
+        sb.AppendLine("[env]");
+        sb.AppendLine($"CODER_CLI_LANG = \"{lang}\"");
+        sb.AppendLine($"LANGUAGE = \"{lang}\"");
+        sb.AppendLine($"CN_MODE = \"{isZh}\"");
+        sb.AppendLine($"CODER_CLI_PROVIDER = \"{provider}\"");
+        sb.AppendLine($"CODER_CLI_CONTEXT_WINDOW = \"{contextWindow}\"");
+        sb.AppendLine("API_TIMEOUT_MS = \"30000\"");
+        sb.AppendLine("C_DISABLE_NONESSENTIAL_TRAFFIC = \"1\"");
+        sb.AppendLine($"CODER_CLI_EFFORT_LEVEL = \"{(isMinimax ? "max" : "high")}\"");
+        if (isMinimax) sb.AppendLine("CODER_CLI_DEEP_OPTIMIZE = \"1\"");
+        if (!string.IsNullOrEmpty(apiKey)) sb.AppendLine($"{envKey} = \"{apiKey}\"");
+        File.WriteAllText(file, sb.ToString());
         return file;
     }
 }

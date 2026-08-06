@@ -26,6 +26,7 @@ public sealed class AgentLoop
     private IProvider? _provider;
     private readonly ToolRegistry _registry;
     private readonly PermissionEngine _permEngine;
+    private readonly HookManager? _hookManager;
     private IAgentHooks _hooks;
     private bool _aborted;
     private string _systemText = "";
@@ -33,13 +34,14 @@ public sealed class AgentLoop
     private TokenUsage _totalUsage = new(0, 0);
 
     public AgentLoop(CoderConfig cfg, IProvider? provider, ToolRegistry registry, PermissionEngine permEngine, IAgentHooks hooks,
-        string? systemPrompt = null, string? sessionContext = null)
+        string? systemPrompt = null, string? sessionContext = null, HookManager? hookManager = null)
     {
         _cfg = cfg;
         _provider = provider;
         _registry = registry;
         _permEngine = permEngine;
         _hooks = hooks;
+        _hookManager = hookManager;
         if (systemPrompt != null) _systemText = systemPrompt;
         if (sessionContext != null) _sessionContext = sessionContext;
     }
@@ -197,31 +199,29 @@ public sealed class AgentLoop
         if (toolCalls.Count == 0) return (false, text);
 
         var results = new List<ToolResult>();
-        foreach (var inv in toolCalls.Values)
+        foreach (var inv0 in toolCalls.Values)
         {
             if (_aborted || signal.IsCancellationRequested) throw new AbortError();
+            var inv = inv0;
             ToolResult r;
-            try
+
+            // PreToolUse hook:先于权限引擎。deny → 直接构造失败结果,模型可见原因;args → 覆盖输入。
+            var pre = _hookManager == null ? null : await _hookManager.PreToolUseAsync(inv);
+            if (pre != null && pre.Blocked)
             {
-                Log.Instance.Debug($"TOOL_START name={inv.Name} input={System.Text.Json.JsonSerializer.Serialize(inv.Input)}");
-                r = await _registry.InvokeAsync(inv, new ToolContext
-                {
-                    Cwd = _cfg.Cwd,
-                    UserConfigDir = _cfg.UserConfigDir,
-                    RequestPermission = (td, ti) => _permEngine.Check(td, ti),
-                    OnProgress = m => Log.Instance.Debug($"[{inv.Name}] {m}"),
-                    OnExecuting = () => _hooks.OnToolStart(inv, _registry.Get(inv.Name).Def, DescribeTool(inv)),
-                });
-                Log.Instance.Debug($"TOOL_END name={inv.Name} ok={r.Ok} out={r.Output[..Math.Min(80, r.Output.Length)]}");
+                r = new ToolResult(inv.Id, false, pre.Reason ?? "Blocked by hook", Error: "HOOK_BLOCKED");
+                Log.Instance.Warn($"HOOK_PRE_BLOCK tool={inv.Name} reason={pre.Reason}");
             }
-            catch (Exception e) when (e is PermissionDeniedError pde)
+            else
             {
-                r = new ToolResult(inv.Id, false, pde.Message, Error: pde.Message);
+                if (pre?.InputOverride != null) inv = inv with { Input = pre.InputOverride };
+                r = await InvokeToolAsync(inv, signal);
             }
-            catch (Exception e)
-            {
-                r = new ToolResult(inv.Id, false, $"Error: {e.Message}", Error: e.Message);
-            }
+
+            // PostToolUse hook:被拒绝的调用不再触发。
+            if (_hookManager != null && r.Error != "HOOK_BLOCKED")
+                await _hookManager.PostToolUseAsync(inv, r);
+
             results.Add(r);
             _hooks.OnToolEnd(inv, r);
 
@@ -234,6 +234,33 @@ public sealed class AgentLoop
 
         _messages.Add(Messages.ToolResultsToUserMessage(results));
         return (true, text);
+    }
+
+    /// <summary>执行单个工具调用(权限检查 + handler + 异常转 ToolResult)。</summary>
+    private async Task<ToolResult> InvokeToolAsync(ToolInvocation inv, CancellationToken signal)
+    {
+        try
+        {
+            Log.Instance.Debug($"TOOL_START name={inv.Name} input={System.Text.Json.JsonSerializer.Serialize(inv.Input)}");
+            var r = await _registry.InvokeAsync(inv, new ToolContext
+            {
+                Cwd = _cfg.Cwd,
+                UserConfigDir = _cfg.UserConfigDir,
+                RequestPermission = (td, ti) => _permEngine.Check(td, ti),
+                OnProgress = m => Log.Instance.Debug($"[{inv.Name}] {m}"),
+                OnExecuting = () => _hooks.OnToolStart(inv, _registry.Get(inv.Name).Def, DescribeTool(inv)),
+            });
+            Log.Instance.Debug($"TOOL_END name={inv.Name} ok={r.Ok} out={r.Output[..Math.Min(80, r.Output.Length)]}");
+            return r;
+        }
+        catch (Exception e) when (e is PermissionDeniedError pde)
+        {
+            return new ToolResult(inv.Id, false, pde.Message, Error: pde.Message);
+        }
+        catch (Exception e)
+        {
+            return new ToolResult(inv.Id, false, $"Error: {e.Message}", Error: e.Message);
+        }
     }
 
     private string? DescribeTool(ToolInvocation inv)

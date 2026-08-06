@@ -32,13 +32,13 @@ public static class SkillPaths
         var candidates = new List<string>
         {
             Path.Combine(cwd, "skills"),
-            Path.Combine(cwd, ".coder-cli", "skills"),
+            Path.Combine(cwd, ".coder", "skills"),
             Path.Combine(cwd, ".claude", "skills"),
             Path.Combine(cwd, ".cursor", "skills"),
             Path.Combine(cwd, ".codex", "skills"),
             Path.Combine(cwd, ".agents", "skills"),
             Path.Combine(userConfigDir, "skills"),
-            Path.Combine(home, ".coder-cli", "skills"),
+            Path.Combine(home, ".coder", "skills"),
             Path.Combine(home, ".cursor", "skills"),
             Path.Combine(home, ".cursor", "skills-cursor"),
             Path.Combine(home, ".claude", "skills"),
@@ -298,7 +298,7 @@ public sealed class SkillLoader
     {
         var norm = p.Replace('\\', '/').ToLowerInvariant();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).Replace('\\', '/').ToLowerInvariant();
-        if (norm.Contains(".coder-cli") || norm.Contains("/.config/coder")) return SkillOrigin.Coder;
+        if (norm.Contains("/.coder") || norm.Contains("/.config/coder")) return SkillOrigin.Coder;
         if (norm.StartsWith(home)) return SkillOrigin.Global;
         return SkillOrigin.Project;
     }

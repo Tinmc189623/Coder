@@ -2,6 +2,7 @@
 // Wires CLI parsing, config, provider, registry, agent loop, REPL.
 // Ported from src/cli.ts.
 
+using Coder.Agents;
 using Coder.Config;
 using Coder.Core;
 using Coder.Localization;
@@ -22,6 +23,7 @@ public static class Cli
         Console.InputEncoding = System.Text.Encoding.UTF8;
 
         var parsed = ParseCliArgs(argv);
+        Setup.MigrateLegacyIfPresent();   // 旧 ~/.coder-cli/config.json → ~/.coder/settings.toml(一次性)
         ConfigLoader.PreloadUserConfigEnv();
         I18n.ApplyLocale(parsed.Lang);
 
@@ -49,14 +51,12 @@ public static class Cli
             catch (Exception e) { Log.Instance.Warn("Setup skipped:", e.Message); }
         }
 
-        var (config, _) = ConfigLoader.LoadConfig(parsed.Overrides, cwd);
+        var (config, layers) = ConfigLoader.LoadConfig(parsed.Overrides, cwd);
 
         if (parsed.Lang == null)
             I18n.ApplyLocale(config.Lang, config.CnMode);
 
         Theme.Apply(config.Theme);
-
-        ConfigLoader.ReconcileUserConfigEnv(config);
 
         // Vendor-specific quality preset (e.g. MiniMax deep-optimize).
         if (config.DeepOptimize || DeepOptimize.ShouldApply(config.Provider))
@@ -90,11 +90,14 @@ public static class Cli
         }
         catch (Exception e) { Log.Instance.Debug("skill discovery failed: " + e.Message); }
 
-        // Project context (AGENTS.md / CLAUDE.md / README.md).
+        // Agent templates (.coder/agents + ~/.coder/agents).
+        var agentTemplates = await AgentTemplateLoader.LoadAsync(config.Cwd, config.UserConfigDir);
+
+        // Project rules (CODER.md / CLAUDE.md / AGENTS.md / AGENT.md) + global ~/.coder/CODER.md.
         var projectContext = "";
         try
         {
-            var pc = await ProjectContextLoader.LoadAsync(config.Cwd);
+            var pc = await ProjectContextLoader.LoadAsync(config.Cwd, config.UserConfigDir);
             projectContext = ProjectContextLoader.Render(pc);
         }
         catch (Exception e) { Log.Instance.Debug("project context failed: " + e.Message); }
@@ -111,7 +114,8 @@ public static class Cli
             () => state?.Config ?? config,
             skillLoader,
             config.UserConfigDir,
-            (prompt, options) => Terminal.IsInteractive() ? Prompter.Choose(prompt, options, 0) : -1);
+            (prompt, options) => Terminal.IsInteractive() ? Prompter.Choose(prompt, options, 0) : -1,
+            agentTemplates);
 
         // Provider (null until API key present).
         IProvider? provider = null;
@@ -148,10 +152,18 @@ public static class Cli
         var permEngine = new PermissionEngine(askUser);
         permEngine.SetMode(config.PermissionMode);
 
+        var hookManager = HookManager.FromLayers(layers, config.Cwd);
+
         var systemText = SystemPrompt.Build(config);
         var sessionCtx = RuntimeContext.BuildSessionContext(config, projectContext, skillList);
+        try
+        {
+            var extra = await hookManager.SessionStartAsync();
+            if (!string.IsNullOrWhiteSpace(extra)) sessionCtx += "\n" + extra;
+        }
+        catch (Exception e) { Log.Instance.Debug("SessionStart hook failed: " + e.Message); }
 
-        var agent = new AgentLoop(config, provider, registry, permEngine, renderer, systemText, sessionCtx);
+        var agent = new AgentLoop(config, provider, registry, permEngine, renderer, systemText, sessionCtx, hookManager);
 
         if (parsed.Positional.Count > 0)
         {
@@ -164,9 +176,21 @@ public static class Cli
             }
             RefreshProvider(config, agent);
             renderer.BeginTurn();
-            try { await agent.Run(prompt); }
+            try
+            {
+                var pd = await hookManager.UserPromptSubmitAsync(prompt);
+                if (pd.Block)
+                {
+                    renderer.EndTurn();
+                    Console.WriteLine(Theme.Dim(pd.Reason ?? "Prompt blocked by hook"));
+                    return 0;
+                }
+                var finalPrompt = string.IsNullOrEmpty(pd.AdditionalContext) ? prompt : prompt + "\n\n" + pd.AdditionalContext;
+                await agent.Run(finalPrompt);
+            }
             catch (Exception e) { renderer.EndTurn(); StreamRenderer.PrintError(e.Message); return 1; }
             renderer.EndTurn();
+            try { await hookManager.StopAsync(); } catch { }
             return 0;
         }
 
@@ -178,6 +202,7 @@ public static class Cli
             Registry = registry,
             PermEngine = permEngine,
             SkillLoader = skillLoader,
+            HookManager = hookManager,
             SystemText = systemText,
             ProjectContext = projectContext,
             SkillList = skillList,
@@ -206,7 +231,7 @@ public static class Cli
         Console.WriteLine(Theme.Dim("  " + I18n.T("error.noApiKey.deferredHint")));
         Console.WriteLine($"  {Theme.Info("1.")} {I18n.Tf("error.noApiKey.way1", "coder --api-key sk-…")}");
         Console.WriteLine($"  {Theme.Info("2.")} {I18n.Tf("error.noApiKey.way2", envName)}");
-        Console.WriteLine($"  {Theme.Info("3.")} {I18n.Tf("error.noApiKey.way3Header", $"{cfg.UserConfigDir}/config.json")}:");
+        Console.WriteLine($"  {Theme.Info("3.")} {I18n.Tf("error.noApiKey.way3Header", $"{cfg.UserConfigDir}/settings.toml")}:");
         Console.WriteLine($"        {Theme.Dim(I18n.Tf("error.noApiKey.way3Body", envName))}");
     }
 
@@ -311,8 +336,8 @@ public static class Cli
             "  -h, --help               " + Theme.Dim(I18n.T("flags.help")),
             "",
             Theme.Bold(I18n.T("cli.configTitle")),
-            "  " + Theme.Muted(I18n.T("cli.userConfigLabel") + "  ") + Theme.Info("~/.coder-cli/config.json"),
-            "  " + Theme.Muted(I18n.T("cli.projectConfigLabel") + "  ") + Theme.Dim("./coder-cli.config.json"),
+            "  " + Theme.Muted(I18n.T("cli.userConfigLabel") + "  ") + Theme.Info("~/.coder/settings.toml"),
+            "  " + Theme.Muted(I18n.T("cli.projectConfigLabel") + "  ") + Theme.Dim("./.coder/settings.toml"),
             "",
             Theme.Bold(I18n.T("cli.examplesTitle")),
             "  " + Theme.Dim("coder \"explain this repo\""),

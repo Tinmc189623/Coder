@@ -61,9 +61,60 @@ dotnet run
 
 ## 配置
 
-分层配置,优先级从高到低:**CLI 参数** → **环境变量** → 项目 `./coder-cli.config.json` → 用户 `~/.coder-cli/config.json`。
+分层 **TOML** 配置,优先级从高到低:**CLI 参数** → 项目 `./.coder/settings.toml` → 用户 `~/.coder/settings.toml` → 环境变量(仅兜底)。
+
+```toml
+# ./.coder/settings.toml(项目)  |  ~/.coder/settings.toml(用户)
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+effortLevel = "high"
+contextWindow = 200000
+
+[env]                        # 注入进程环境
+OPENAI_API_KEY = "sk-…"
+```
 
 已识别的键包括提供商 API-key 环境变量(`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`KIMI_API_KEY`、`MINIMAX_API_KEY`、`OLLAMA_API_KEY`)、端点覆盖(`OPENAI_BASE_URL`、`OLLAMA_HOST` / `OLLAMA_BASE_URL`)、`CN_MODE`(开启时兼容目录提供商回退到已定义的国内镜像 base URL),以及用于 CLI 默认值的 `CODER_CLI_*` 系列:`CODER_CLI_PROVIDER`、`CODER_CLI_MODEL`、`CODER_CLI_BASE_URL`、`CODER_CLI_AUTH_TOKEN`、`CODER_CLI_LANG`、`CODER_CLI_CONTEXT_WINDOW`、`CODER_CLI_EFFORT_LEVEL`、`CODER_CLI_SUBAGENT_MODEL`、`CODER_CLI_DEEP_OPTIMIZE`。
+
+旧 `~/.coder-cli/config.json` 首次运行时会一次性迁移到 `~/.coder/settings.toml`(旧文件保留)。
+
+### 规则文件
+
+项目规则,首个命中生效:`CODER.md` → `CLAUDE.md` → `AGENTS.md` → `AGENT.md`(README.md 兜底)。全局规则:`~/.coder/CODER.md`。两者注入会话上下文(全局在前、项目在后)。
+
+### 事件钩子(hooks)
+
+五个事件,定义在任一 settings 文件的 `[hooks]` 段(array-of-tables)。每个 hook 启动一个进程;stdout 遵循 Claude Code JSON 协议。
+
+```toml
+[hooks]
+[[hooks.PreToolUse]]
+matcher = "bash|file_edit"     # 可选:正则匹配工具名/提示词
+command = "sh .coder/hooks/guard.sh"
+timeout = 30                   # 秒,默认 60
+blocked = true                 # 仅 PreToolUse:不 spawn 直接拒绝
+
+[[hooks.PostToolUse]]
+command = "notify.sh"
+```
+
+`PreToolUse` 可拒绝(JSON `{"permissionDecision":"deny",…}` 或退出码 2)或改写参数(`{"args":{…}}`);`UserPromptSubmit` 可拦截或追加上下文(`{"block":true}` / `{"additionalContext":"…"}`);`SessionStart` 的 stdout 追加进会话上下文;`Stop` 在会话结束时触发。钩子收到 `CODER_HOOK_*` 环境变量(事件、cwd、工具名/输入/ID/结果、提示词)。
+
+### agent 模板
+
+自定义子代理,frontmatter 格式,项目 `.coder/agents/*.md` 优先、用户 `~/.coder/agents/*.md` 兜底(同名项目覆盖):
+
+```markdown
+---
+name: "security-review"
+description: "Reviews code for security issues"
+tools: file_read, glob, grep, bash
+model: "claude-sonnet-4-5"
+---
+You are a security reviewer. Focus on OWASP Top 10…
+```
+
+模板正文成为该子代理的系统提示;模板名出现在 `Task` 工具的 `subagent_type` 选项中。
 
 首次交互运行时,设置向导会询问语言、提供商与 API key。
 

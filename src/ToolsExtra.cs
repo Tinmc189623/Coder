@@ -38,26 +38,29 @@ public static class ExtraTools
         Func<CoderConfig> configProvider,
         SkillLoader? skillLoader,
         string userConfigDir,
-        Func<string, List<string>, int>? askChoice = null)
+        Func<string, List<string>, int>? askChoice = null,
+        IReadOnlyList<Coder.Agents.AgentTemplate>? agentTemplates = null)
     {
-        RegisterTask(registry, configProvider);
+        RegisterTask(registry, configProvider, agentTemplates);
         if (skillLoader != null) RegisterSkill(registry, skillLoader);
         RegisterMemory(registry, userConfigDir);
         RegisterAskUser(registry, askChoice);
     }
 
     // ── Task (subagent) ─────────────────────────────────────────────────────
-    private static void RegisterTask(ToolRegistry registry, Func<CoderConfig> configProvider)
+    private static void RegisterTask(ToolRegistry registry, Func<CoderConfig> configProvider,
+        IReadOnlyList<Coder.Agents.AgentTemplate>? agentTemplates = null)
     {
+        var allTypes = SubAgent.AllTypes(agentTemplates);
         var def = new ToolDefinition(
             "Task",
             "Spawn a subagent to handle a self-contained subtask. The subagent has its own message log and " +
             "returns only a final summary. Use this to delegate research or isolated work. " +
-            $"Available subagent_type values: {string.Join(", ", SubAgent.Types)}.",
+            $"Available subagent_type values: {string.Join(", ", allTypes)}.",
             ObjSchema(new Dictionary<string, object?>
             {
                 ["prompt"] = Prop("string", "Detailed instruction for the subagent"),
-                ["subagent_type"] = Prop("string", "Type of subagent (general-purpose, Explore, Plan)", SubAgent.Types),
+                ["subagent_type"] = Prop("string", "Type of subagent", allTypes),
                 ["model"] = Prop("string", "Override model for the subagent"),
                 ["description"] = Prop("string", "Short task description"),
             }, new[] { "prompt", "description" }));
@@ -75,7 +78,8 @@ public static class ExtraTools
                 prompt,
                 Str(input, "subagent_type") ?? "general-purpose",
                 Str(input, "model"),
-                ctx.OnProgress);
+                ctx.OnProgress,
+                agentTemplates);
 
             var text = result.Summary;
             if (result.TokensUsed > 0)

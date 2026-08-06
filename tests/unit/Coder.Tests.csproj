@@ -18,11 +18,15 @@
     Compile the production source tree verbatim, except the CLI entry point
     (which would collide with this project's own Main). Tests exercise the real
     implementations — no mocks, no stubs for the logic under test.
+    Single external dependency: Tomlyn (TOML config parsing), shared with src/.
   -->
   <ItemGroup>
     <Compile Include="..\..\src\**\*.cs" />
     <Compile Remove="..\..\src\Program.cs" />
     <Compile Include="**\*.cs" Exclude="obj\**\*.cs;bin\**\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Tomlyn" Version="0.19.0" />
   </ItemGroup>
 
 </Project>

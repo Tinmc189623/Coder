@@ -63,8 +63,19 @@ The project file sits at the repository root, so it disables the SDK's default
 
 ## Configuration
 
-Layered, highest priority first: **CLI flags** → **env vars** → project
-`./coder-cli.config.json` → user `~/.coder-cli/config.json`.
+Layered **TOML** config, highest priority first: **CLI flags** → project
+`./.coder/settings.toml` → user `~/.coder/settings.toml` → env vars (fallback only).
+
+```toml
+# ./.coder/settings.toml  (project)  |  ~/.coder/settings.toml  (user)
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+effortLevel = "high"
+contextWindow = 200000
+
+[env]                        # injected into the process environment
+OPENAI_API_KEY = "sk-…"
+```
 
 Recognised keys include the provider API-key env vars (`ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `MINIMAX_API_KEY`,
@@ -74,6 +85,56 @@ China-mirror base URL where one is defined), and the
 `CODER_CLI_*` family for CLI defaults: `CODER_CLI_PROVIDER`, `CODER_CLI_MODEL`,
 `CODER_CLI_BASE_URL`, `CODER_CLI_AUTH_TOKEN`, `CODER_CLI_LANG`, `CODER_CLI_CONTEXT_WINDOW`,
 `CODER_CLI_EFFORT_LEVEL`, `CODER_CLI_SUBAGENT_MODEL`, `CODER_CLI_DEEP_OPTIMIZE`.
+
+A legacy `~/.coder-cli/config.json` is migrated to `~/.coder/settings.toml` once
+on first run (the old file is kept).
+
+### Rules files
+
+Project rules, first match wins: `CODER.md` → `CLAUDE.md` → `AGENTS.md` →
+`AGENT.md` (README.md as fallback). Global rules: `~/.coder/CODER.md`.
+Both are injected into the session context (global first, project after).
+
+### Event hooks
+
+Five events, defined in either settings file under `[hooks]` as array-of-tables.
+Each hook spawns a process; stdout follows the Claude Code JSON protocol.
+
+```toml
+[hooks]
+[[hooks.PreToolUse]]
+matcher = "bash|file_edit"     # optional regex on tool name / prompt
+command = "sh .coder/hooks/guard.sh"
+timeout = 30                   # seconds, default 60
+blocked = true                 # PreToolUse only: deny without spawning
+
+[[hooks.PostToolUse]]
+command = "notify.sh"
+```
+
+`PreToolUse` can deny (JSON `{"permissionDecision":"deny",…}` or exit code 2) or
+rewrite arguments (`{"args":{…}}`); `UserPromptSubmit` can block or append
+context (`{"block":true}` / `{"additionalContext":"…"}`); `SessionStart` stdout
+is appended to the session context; `Stop` fires on session end. Hooks receive
+`CODER_HOOK_*` environment variables (event, cwd, tool name/input/id/result, prompt).
+
+### Agent templates
+
+Custom subagents as frontmatter files, project `.coder/agents/*.md` then user
+`~/.coder/agents/*.md` (same name → project wins):
+
+```markdown
+---
+name: "security-review"
+description: "Reviews code for security issues"
+tools: file_read, glob, grep, bash
+model: "claude-sonnet-4-5"
+---
+You are a security reviewer. Focus on OWASP Top 10…
+```
+
+The template body becomes the subagent's system prompt; templates appear in the
+`Task` tool's `subagent_type` options.
 
 On first interactive run a setup wizard asks for language, provider and key.
 
