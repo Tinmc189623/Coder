@@ -21,6 +21,8 @@ production-grade AI coding agent for the terminal
 version from `Brand.Version` and the configured provider/model, see
 `Banner.Render` in `src/Ui.cs`.)
 
+**Docs:** English · [简体中文](README.zh-CN.md) · [Changelog](CHANGELOG.md)
+
 ## Repository layout
 
 | Path | What it is |
