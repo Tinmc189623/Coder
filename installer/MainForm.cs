@@ -90,7 +90,7 @@ public sealed class MainForm : Form
         {
             Text = _uninstallMode
                 ? "将移除 Coder CLI 及其快捷方式与 PATH 配置。"
-                : "Coder CLI v0.2.3 将安装到你的用户目录,无需管理员权限。",
+                : "Coder CLI v0.3.0 将安装到你的用户目录,无需管理员权限。",
             Location = new Point(24, 128),
             Size = new Size(432, 44),
             Font = new Font("Microsoft YaHei UI", 10f),

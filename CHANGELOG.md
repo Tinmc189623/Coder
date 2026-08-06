@@ -10,6 +10,23 @@ Released by [Nexsteaduser](https://github.com/Tinmc189623/Coder) · Copyright ©
 
 - (none)
 
+## [0.3.0] — 2026-08-06
+
+### Added
+
+- **TOML configuration** (Tomlyn): project `./.coder/settings.toml` + user `~/.coder/settings.toml`; priority CLI flags > project > user > env fallback; `[env]` block injection. Legacy `~/.coder-cli/config.json` is migrated once on first run (old file kept).
+- **Rules files**: project `CODER.md` → `CLAUDE.md` → `AGENTS.md` → `AGENT.md` (first match wins, README fallback) + global `~/.coder/CODER.md`; `/init` now writes `CODER.md`.
+- **Event hooks**: `PreToolUse` (deny / args override), `PostToolUse`, `UserPromptSubmit` (block / additionalContext), `SessionStart`, `Stop` — defined in `[hooks]` as array-of-tables, spawned per the Claude Code JSON protocol with `CODER_HOOK_*` env vars.
+- **Agent templates**: custom subagents via frontmatter files (`.coder/agents/*.md` project-first, `~/.coder/agents/*.md` fallback); body becomes the subagent system prompt; template names appear in the `Task` tool's `subagent_type` options.
+- **OpenAI Responses API** (`/v1/responses`): opt-in via `CODER_CLI_OPENAI_PROTOCOL=responses`, chat/completions stays the default.
+- **Anthropic Extended Thinking** (`CODER_CLI_ANTHROPIC_THINKING`), **Prompt Caching** (`CODER_CLI_ANTHROPIC_CACHE`), **Count Tokens API** (`/v1/messages/count_tokens`).
+
+### Changed
+
+- Unit tests 32 → 64 (TOML parsing, hook protocol, rule precedence, agent templates, config migration).
+- Skills/memory directories moved from `.coder-cli` to `.coder`.
+- README (EN/ZH) documents the new configuration system.
+
 ## [0.2.3] — 2026-08-06
 
 ### Changed
@@ -43,7 +60,8 @@ Released by [Nexsteaduser](https://github.com/Tinmc189623/Coder) · Copyright ©
 - Test infrastructure: Python smoke suite (internal) and a zero-dependency C# unit project (reflection-based runner compiling the production `src/` tree verbatim).
 - Apache License 2.0 with the Nexsteaduser copyright notice.
 
-[Unreleased]: https://github.com/Tinmc189623/Coder/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/Tinmc189623/Coder/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Tinmc189623/Coder/releases/tag/v0.3.0
 [0.2.3]: https://github.com/Tinmc189623/Coder/releases/tag/v0.2.3
 [0.2.2]: https://github.com/Tinmc189623/Coder/releases/tag/v0.2.2
 [0.2.1]: https://github.com/Tinmc189623/Coder/releases/tag/v0.2.1

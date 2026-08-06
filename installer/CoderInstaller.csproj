@@ -12,7 +12,7 @@
     <InvariantGlobalization>false</InvariantGlobalization>
     <AssemblyTitle>Coder CLI Installer</AssemblyTitle>
     <AssemblyDescription>Coder CLI — one-click installer (Nexsteaduser)</AssemblyDescription>
-    <Version>0.2.3</Version>
+    <Version>0.3.0</Version>
     <Authors>Nexsteaduser</Authors>
     <Company>Nexsteaduser</Company>
     <Copyright>Copyright © 2026 Nexsteaduser. All Rights Reserved.</Copyright>

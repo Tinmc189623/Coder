@@ -4,14 +4,14 @@
 
 **production-grade AI coding agent for the terminal** — written in **C# / .NET 11**
 
-![Version](https://img.shields.io/badge/version-0.2.3-af87ff?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.3.0-af87ff?style=flat-square)
 ![.NET](https://img.shields.io/badge/.NET-11-00d7ff?style=flat-square)
 ![License](https://img.shields.io/badge/license-Apache%202.0-ffaf00?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows-af87ff?style=flat-square)
 ![Language](https://img.shields.io/badge/language-C%23-00d7ff?style=flat-square)
 
 ```
-◆ Coder CLI  v0.2.3  ·  anthropic/claude-sonnet-4-5
+◆ Coder CLI  v0.3.0  ·  anthropic/claude-sonnet-4-5
 production-grade AI coding agent for the terminal
 ```
 
@@ -164,7 +164,7 @@ Every mutating tool goes through the permission engine. Modes:
 /config                      effective configuration  /cwd        show/change directory
 /model [name]                show/switch model        /skills     list | load | install
 /provider [name]             show/switch provider     /memory     list | read | write
-/permission-mode [mode]      cycle permission mode    /init       generate AGENTS.md
+/permission-mode [mode]      cycle permission mode    /init       generate CODER.md
 /exit
 ```
 

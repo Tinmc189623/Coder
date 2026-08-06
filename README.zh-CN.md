@@ -4,14 +4,14 @@
 
 **面向终端的生产级 AI 编程智能体** —— 使用 **C# / .NET 11** 编写
 
-![Version](https://img.shields.io/badge/version-0.2.3-af87ff?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.3.0-af87ff?style=flat-square)
 ![.NET](https://img.shields.io/badge/.NET-11-00d7ff?style=flat-square)
 ![License](https://img.shields.io/badge/license-Apache%202.0-ffaf00?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows-af87ff?style=flat-square)
 ![Language](https://img.shields.io/badge/language-C%23-00d7ff?style=flat-square)
 
 ```
-◆ Coder CLI  v0.2.3  ·  anthropic/claude-sonnet-4-5
+◆ Coder CLI  v0.3.0  ·  anthropic/claude-sonnet-4-5
 production-grade AI coding agent for the terminal
 ```
 
@@ -138,7 +138,7 @@ You are a security reviewer. Focus on OWASP Top 10…
 /config                      打印当前生效配置        /cwd        查看/切换工作目录
 /model [name]                查看/切换模型          /skills     技能:列出 / 加载 / 安装
 /provider [name]             查看/切换厂商          /memory     长期记忆:列出 / 读取 / 写入
-/permission-mode [mode]      循环或设置权限模式      /init       生成 AGENTS.md 项目说明
+/permission-mode [mode]      循环或设置权限模式      /init       生成 CODER.md 项目规则
 /exit                        退出
 ```
 
