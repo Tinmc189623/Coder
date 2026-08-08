@@ -499,14 +499,27 @@ public static class Repl
     public static async Task RunAsync(ReplState st)
     {
         Console.Out.Write(Banner.Render(st.Config));
-        Console.Out.Write(StatusLine.ShortcutsPanel());
+        Console.Out.Write(SuggestionLines(st.Config));
+
+        st.Renderer.SetStatusSource(() => new StatusModel
+        {
+            Phase = st.Renderer.CurrentPhase,
+            ContextUsed = Cli.EstimateContext(st.Config, st.Agent),
+            ContextTotal = st.Config.ContextWindow,
+            Mode = st.Config.PermissionMode,
+            InputTokens = st.Agent.GetUsage().InputTokens,
+            OutputTokens = st.Agent.GetUsage().OutputTokens,
+            Turn = st.Agent.GetMessages().Count,
+            Model = $"{st.Config.Provider}/{st.Config.Model}",
+            Cwd = st.Config.Cwd,
+        });
 
         using var cancel = new ConsoleCancelHandler(st);
 
         while (!st.ShouldExit)
         {
             string? input;
-            try { input = LineInput.Read(Theme.Brand(Brand.Glyph + " ") + Theme.Bold("› "), SlashCommands.Names()); }
+            try { input = LineInput.Read(Theme.Brand(">") + " ", SlashCommands.Names()); }
             catch (IOException) { break; }
             if (input == null) break;
             input = input.Trim();
@@ -554,6 +567,21 @@ public static class Repl
             try { await st.HookManager.StopAsync(); } catch { }
         }
         Console.Out.WriteLine("\n" + Theme.Dim(I18n.T("repl.exit.bye")));
+    }
+
+    /// <summary>欢迎框下方的建议行:当前模型/思考力度 + 常用命令提示。</summary>
+    private static string SuggestionLines(CoderConfig cfg)
+    {
+        var zh = I18n.Current.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+        var effort = cfg.EffortLevel.ToString();
+        var model = $"{cfg.Provider}/{cfg.Model}";
+        var l1 = zh
+            ? $"使用 {model} · {effort} 思考力度 — 兼顾 token 消耗与能力的最佳平衡"
+            : $"Use {model} with {effort} thinking effort - for the best balance between token spend and capability";
+        var l2 = zh
+            ? "运行 /help 查看命令 · /model 切换模型 · Shift+Tab 切换权限模式"
+            : "Run /help for commands · /model to switch model · Shift+Tab to cycle permission mode";
+        return Theme.Brand("✦ ") + l1 + "\n" + Theme.Dim(l2) + "\n\n";
     }
 
     /// <summary>Trim history automatically once the context budget crosses the threshold.</summary>

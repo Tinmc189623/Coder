@@ -191,14 +191,36 @@ public static class Brand
 
 public static class Banner
 {
+    /// <summary>会话标识:一次进程一个,欢迎框里展示。</summary>
+    private static readonly string SessionId = "session_" + Guid.NewGuid().ToString("D");
+
+    /// <summary>
+    /// Kimi 风格全宽欢迎框:块字符 logo 与标题并排,下方 Directory / Session /
+    /// Model / Version 信息行,末尾品牌版权行。
+    /// </summary>
     public static string Render(CoderConfig cfg)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine(Theme.Gradient($"{Brand.Glyph} Coder CLI") + "  " + Theme.Dim($"v{Brand.Version}  ·  {cfg.Provider}/{cfg.Model}"));
-        sb.AppendLine(Theme.Dim("production-grade AI coding agent for the terminal"));
-        sb.AppendLine();
-        return sb.ToString();
+        var lines = new List<string>
+        {
+            // 7×3 块字符 logo(▐█▀▀▀█▌ / ▐  ◆  ▌ / ▐█▄▄▄█▌),◆ 用品牌亮紫。
+            Theme.BrandSecondary("▐█▀▀▀█▌") + "  " + Theme.Gradient("Welcome to Coder CLI!"),
+            Theme.BrandSecondary("▐") + "  " + Theme.Brand("◆") + "  " + Theme.BrandSecondary("▌") +
+                "  " + Theme.Dim("Send /help for help information."),
+            Theme.BrandSecondary("▐█▄▄▄█▌"),
+            "",
+            InfoRow("Directory", cfg.Cwd),
+            InfoRow("Session", SessionId),
+            InfoRow("Model", $"{cfg.Provider}/{cfg.Model}"),
+            InfoRow("Version", Brand.Version),
+            "",
+            Theme.Muted("Copyright © 2026 Nexsteaduser. All Rights Reserved."),
+        };
+        return Chrome.BoxPanel(lines, fullWidth: true) + "\n";
     }
+
+    /// <summary>信息行:标签+冒号右对齐到同列(如 "Directory:  " / "Session:   "),值跟后。</summary>
+    private static string InfoRow(string label, string value)
+        => Theme.Dim((label + ":").PadRight(11)) + value;
 }
 
 public sealed class StreamRenderer : IAgentHooks
@@ -217,6 +239,9 @@ public sealed class StreamRenderer : IAgentHooks
 
     /// <summary>注入状态行数据源(REPL/一次性路径各设一次)。</summary>
     public void SetStatusSource(Func<StatusModel>? source) => _statusSource = source;
+
+    /// <summary>当前回合相位(状态栏数据源取用)。</summary>
+    public Phase CurrentPhase => _state.Phase;
 
     public void BeginTurn()
     {

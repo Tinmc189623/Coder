@@ -297,20 +297,34 @@ public sealed class StatusModel
     public int InputTokens;
     public int OutputTokens;
     public int Turn;
+    public string Model = "";
+    public string Cwd = "";
 }
 
 public static class StatusBar
 {
-    /// <summary>渲染状态行(单行,窄终端右侧截断)。</summary>
+    /// <summary>渲染状态栏(两行):上 = 模型/相位/目录 左对齐 + 权限模式右对齐;
+    /// 下 = token 用量左对齐 + context 用量右对齐。窄终端整行截断。</summary>
     public static string Compose(StatusModel m, Func<string>? phaseGlyph = null)
     {
+        var cols = Math.Max(40, Terminal.Cols() - 1);
         var glyph = phaseGlyph?.Invoke() ?? PhaseGlyph(m.Phase);
         var label = PhaseLabel(m.Phase);
-        var ctx = ContextText(m.ContextUsed, m.ContextTotal);
-        var mode = ModeText(m.Mode);
-        var tokens = $"{FormatK(m.InputTokens)}↑ {FormatK(m.OutputTokens)}↓";
-        var line = $"{Theme.Dim(glyph)} {label} · {ctx} · {mode} · {tokens} · turn {m.Turn}";
-        return TextFmt.TruncateVisible(line, Math.Max(20, Terminal.Cols() - 1));
+
+        var left1 = $"{Theme.Bold(m.Model)} {glyph} {label}  {Theme.Dim(m.Cwd)}";
+        var left2 = Theme.Dim($"{FormatK(m.InputTokens)}↑ {FormatK(m.OutputTokens)}↓") +
+                    Theme.Dim($"  turn {m.Turn}");
+        return PadBoth(left1, ModeText(m.Mode), cols) + "\n" +
+               PadBoth(left2, ContextText(m.ContextUsed, m.ContextTotal), cols);
+    }
+
+    /// <summary>左右两端对齐成一行,过宽时截断并保留右侧。</summary>
+    private static string PadBoth(string left, string right, int width)
+    {
+        var lw = TextFmt.DisplayWidth(left);
+        var rw = TextFmt.DisplayWidth(right);
+        if (lw + rw >= width) return TextFmt.TruncateVisible(left + " " + right, width);
+        return left + new string(' ', width - lw - rw) + right;
     }
 
     private static string PhaseGlyph(Phase p) => p switch
@@ -337,9 +351,9 @@ public static class StatusBar
 
     private static string ContextText(int used, int total)
     {
-        if (total <= 0) return Theme.Muted("ctx ?");
+        if (total <= 0) return Theme.Muted("context: ?");
         var pct = (double)used / total;
-        var text = $"ctx {FormatK(used)}/{FormatK(total)} ({pct * 100:0}%)";
+        var text = $"context: {pct * 100:0}% ({FormatK(used)}/{FormatK(total)})";
         return pct > 0.9 ? Theme.Error(text) : pct > 0.7 ? Theme.Warn(text) : Theme.Dim(text);
     }
 
@@ -351,5 +365,10 @@ public static class StatusBar
         _ => Theme.Muted("mode:default"),
     };
 
-    private static string FormatK(int n) => n >= 1000 ? $"{n / 1000.0:0.#}k" : n.ToString();
+    private static string FormatK(int n) => n switch
+    {
+        >= 1_000_000 => $"{n / 1_000_000.0:0.#}M",
+        >= 1000 => $"{n / 1000.0:0.#}k",
+        _ => n.ToString(),
+    };
 }

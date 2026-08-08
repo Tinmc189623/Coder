@@ -47,4 +47,38 @@ public class TextFmtTests
     {
         Assert.Equal("ab…", TextFmt.TruncateVisible("abcdefg", 3));
     }
+
+    // Ambiguous 字符双宽模式下,"…" 占 2 列,截断预算要同步收紧,
+    // 否则结果行超宽破坏框对齐(CJK 终端经典错位源)。
+    [Test]
+    public void TruncateVisibleAccountsForAmbiguousWideEllipsis()
+    {
+        var prev = TextFmt.AmbiguousWide;
+        try
+        {
+            TextFmt.AmbiguousWide = true;
+            Assert.Equal("a…", TextFmt.TruncateVisible("abcdefg", 3));
+            TextFmt.AmbiguousWide = false;
+            Assert.Equal("ab…", TextFmt.TruncateVisible("abcdefg", 3));
+        }
+        finally { TextFmt.AmbiguousWide = prev; }
+    }
+
+    // 宽模式下,框线/块元素等 UI 装饰字符按 2 列计宽,与 CJK 终端渲染一致。
+    [Test]
+    public void AmbiguousCharsAreDoubleWidthInCjkMode()
+    {
+        var prev = TextFmt.AmbiguousWide;
+        try
+        {
+            TextFmt.AmbiguousWide = true;
+            Assert.Equal(2, TextFmt.DisplayWidth("│"));
+            Assert.Equal(2, TextFmt.DisplayWidth("▐"));
+            Assert.Equal(2, TextFmt.DisplayWidth("·"));
+            TextFmt.AmbiguousWide = false;
+            Assert.Equal(1, TextFmt.DisplayWidth("│"));
+            Assert.Equal(1, TextFmt.DisplayWidth("·"));
+        }
+        finally { TextFmt.AmbiguousWide = prev; }
+    }
 }

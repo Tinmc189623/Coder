@@ -184,6 +184,8 @@ public static class Cli
                 InputTokens = agent.GetUsage().InputTokens,
                 OutputTokens = agent.GetUsage().OutputTokens,
                 Turn = 1,
+                Model = $"{config.Provider}/{config.Model}",
+                Cwd = config.Cwd,
             });
             renderer.BeginTurn();
             try

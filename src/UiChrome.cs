@@ -38,10 +38,19 @@ public static class Terminal
         => !Console.IsInputRedirected && !Console.IsOutputRedirected;
 }
 
-/// <summary>Display-width helpers that account for CJK wide characters and ANSI codes.</summary>
+/// <summary>
+/// Display-width helpers that account for CJK wide characters and ANSI codes.
+/// 对齐前提:宽度计算必须与终端渲染一致。Windows Terminal 等现代终端默认把
+/// East Asian Ambiguous 字符(框线 ╭─╮│、块元素 ▐▌▀▄、◆、"…")按单宽渲染;
+/// legacy conhost + CJK 代码页、或 RUNEWIDTH_EASTASIAN=1 时按双宽——见
+/// AmbiguousWide 的环境探测。
+/// </summary>
 public static class TextFmt
 {
     private static readonly Regex AnsiPattern = new(@"\u001b\[[0-9;]*[A-Za-z]", RegexOptions.Compiled);
+
+    /// <summary>Ambiguous 字符按双宽渲染的终端环境(默认单宽,与 Windows Terminal 一致)。</summary>
+    public static bool AmbiguousWide { get; set; } = DetectAmbiguousWide();
 
     public static string Strip(string s) => AnsiPattern.Replace(s, "");
 
@@ -51,8 +60,51 @@ public static class TextFmt
         var cat = CharUnicodeInfo.GetUnicodeCategory(c);
         if (cat is UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark
             or UnicodeCategory.Format) return 0;
-        return IsWide(c) ? 2 : 1;
+        if (IsWide(c)) return 2;
+        if (AmbiguousWide && IsAmbiguous(c)) return 2;
+        return 1;
     }
+
+    /// <summary>
+    /// East Asian Ambiguous 字符:Unicode 不规定宽度,由终端偏好决定。
+    /// 只列本项目实际使用的字符集(分隔符/框线/块元素/箭头/杂项符号)。
+    /// </summary>
+    private static bool IsAmbiguous(int cp)
+    {
+        if (cp is 0x00B7 /*·*/ || cp is 0x2014 /*—*/ || cp is 0x2022 /*•*/ || cp is 0x2026 /*…*/
+            || cp is 0x2139 /*ℹ*/ || cp is 0x2713 /*✓*/ || cp is 0x2717 /*✗*/ || cp is 0x2726 /*✦*/
+            || cp is 0x276F /*❯*/)
+            return true;
+        return (cp >= 0x2190 && cp <= 0x21FF)   // 箭头 ↑↓→
+            || (cp >= 0x2500 && cp <= 0x25FF)   // 框线 ╭╮╰╯│─ + 块元素 ▐▌▀▄█▍ + 几何 ◆▶●
+            || (cp >= 0x2600 && cp <= 0x26FF)   // 杂项符号 ⚙⛯ℹ(部分)
+            || (cp >= 0x2800 && cp <= 0x28FF);  // braille 点阵 ⠋⠙
+    }
+
+    /// <summary>
+    /// 探测终端对 Ambiguous 字符的宽度偏好:显式 RUNEWIDTH_EASTASIAN=1(Go 生态
+    /// 约定)最优先;Windows 上按 Windows Terminal(窄,默认)vs legacy conhost +
+    /// CJK 代码页(宽)区分;其余平台默认窄。
+    /// </summary>
+    private static bool DetectAmbiguousWide()
+    {
+        if (Environment.GetEnvironmentVariable("RUNEWIDTH_EASTASIAN") == "1") return true;
+        if (OperatingSystem.IsWindows())
+        {
+            // Windows Terminal 把 ambiguous 一律按单宽渲染;conhost 跟随系统代码页。
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WT_SESSION"))) return false;
+            try
+            {
+                var cp = GetACP();
+                return cp is 936 or 950 or 932 or 949;   // GBK / Big5 / Shift-JIS / EUC-KR
+            }
+            catch { return false; }
+        }
+        return false;
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern uint GetACP();
 
     private static bool IsWide(char c)
     {
@@ -73,17 +125,19 @@ public static class TextFmt
         return total;
     }
 
-    /// <summary>Truncate to a display width, appending an ellipsis when cut.</summary>
+    /// <summary>Truncate to a display width, appending an ellipsis when cut.
+    /// 省略号 "…" 本身是 Ambiguous 字符——宽模式下占 2 列,预算要一起扣。</summary>
     public static string TruncateVisible(string s, int max)
     {
         if (max <= 0) return "";
         if (DisplayWidth(s) <= max) return s;
         var sb = new StringBuilder();
         var w = 0;
+        var budget = max - (AmbiguousWide ? 2 : 1);
         foreach (var c in Strip(s))
         {
             var cw = CharWidth(c);
-            if (w + cw > max - 1) break;
+            if (w + cw > budget) break;
             sb.Append(c);
             w += cw;
         }
@@ -173,10 +227,11 @@ public static class Chrome
 
     private const char TL = '╭', TR = '╮', BL = '╰', BR = '╯', H = '─', V = '│';
 
-    /// <summary>Render a rounded box panel around the given lines.</summary>
-    public static string BoxPanel(IEnumerable<string> lines, string? title = null)
+    /// <summary>Render a rounded box panel around the given lines.
+    /// fullWidth 时撑满终端(欢迎 banner / 输入框),默认窄面板(≤100 列)。</summary>
+    public static string BoxPanel(IEnumerable<string> lines, string? title = null, bool fullWidth = false)
     {
-        var inner = BoxInner;
+        var inner = fullWidth ? Math.Max(32, Terminal.Cols() - 4) : BoxInner;
         var sb = new StringBuilder();
         var top = new string(H, inner);
         if (!string.IsNullOrEmpty(title))
