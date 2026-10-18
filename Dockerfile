@@ -14,6 +14,7 @@ RUN apt-get update \
     && useradd --system --uid 10001 --home-dir /var/lib/coder --create-home coder
 
 COPY --from=builder /src/target/release/coder-cloud /usr/local/bin/coder-cloud
+COPY LICENSE NOTICE /usr/share/licenses/coder/
 
 USER coder
 WORKDIR /var/lib/coder

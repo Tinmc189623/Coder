@@ -112,7 +112,7 @@ jobs:
           mkdir -p "dist/${name}"
           install -m 0755 "target/${TARGET}/release/coder" "dist/${name}/coder"
           install -m 0755 "target/${TARGET}/release/coder-cloud" "dist/${name}/coder-cloud"
-          install -m 0644 README.md LICENSE docs/API.md docs/DEPLOYMENT.md docs/SECURITY.md "dist/${name}/"
+          install -m 0644 README.md LICENSE NOTICE docs/API.md docs/DEPLOYMENT.md docs/SECURITY.md "dist/${name}/"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
           (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
       - name: Package archive (Windows)
@@ -126,7 +126,7 @@ jobs:
           $name = "coder-$env:VERSION-$env:TARGET"
           New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
           Copy-Item "target/$env:TARGET/release/coder.exe", "target/$env:TARGET/release/coder-cloud.exe" "dist/$name/"
-          Copy-Item README.md, LICENSE, docs/API.md, docs/DEPLOYMENT.md, docs/SECURITY.md "dist/$name/"
+          Copy-Item README.md, LICENSE, NOTICE, docs/API.md, docs/DEPLOYMENT.md, docs/SECURITY.md "dist/$name/"
           Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
           $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           $line = "$hash  $name.zip`n"

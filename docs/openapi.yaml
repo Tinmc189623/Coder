@@ -3,8 +3,8 @@ info:
   title: Coder Cloud API
   version: 0.1.0
   license:
-    name: MIT
-    url: https://opensource.org/license/mit
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
   description: |
     编程智能体云端协调接口。所有 REST 响应为 JSON，时间使用 RFC 3339 UTC。
     设备 WebSocket 协议见 docs/API.md，OpenAPI 仅描述 HTTP 升级入口。

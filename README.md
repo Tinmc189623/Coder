@@ -8,7 +8,7 @@
   <a href="https://github.com/Tinmc189623/Coder/actions/workflows/ci.yml"><img src="https://github.com/Tinmc189623/Coder/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://github.com/Tinmc189623/Coder/actions/workflows/release.yml"><img src="https://github.com/Tinmc189623/Coder/actions/workflows/release.yml/badge.svg?branch=main" alt="Release"></a>
   <img src="https://img.shields.io/badge/rust-1.94%2B-dea584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.94+">
-  <img src="https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square" alt="MIT License">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="Apache License 2.0">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-4c8bf5?style=flat-square" alt="Windows, Linux, macOS">
 </p>
 
@@ -221,5 +221,5 @@ coder tasks decide <任务 ID> <权限请求 ID> --grant
 ---
 
 <div align="center">
-<sub>MIT Licensed · Copyright © 2026 Nexsteaduser. All Rights Reserved.</sub>
+<sub>Apache License 2.0 · Copyright © 2026 Nexsteaduser. All Rights Reserved.</sub>
 </div>
