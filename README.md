@@ -119,12 +119,13 @@ coder tasks decide <任务 ID> <权限请求 ID> --grant
 - 工具安全测试覆盖真实文件写入/编辑/读取、父目录穿越、工作区外绝对路径、`.git` 保护、Windows junction 逃逸、只读拒绝、真实命令输出与退出码、超时进程树终止、输出上限。
 - 云端测试覆盖管理员认证、配对令牌一次性消费、设备密钥、用户数据隔离、任务创建/取消/重试、权限请求与批准、WebSocket 下发/心跳/结果确认、限流 429、TLS 健康检查、HTTPS 注册、WSS 会话、四类断线恢复路径。
 - TLS 使用进程内自签名证书与真实 rustls 握手；测试同时确认明文 HTTP 不能从 TLS 监听端口获得应用响应。
+- GitHub Actions CI 在 `ubuntu-latest`、`windows-latest`、`macos-latest` 上实际执行，fmt、clippy、workspace 测试、release 构建全部通过；MSRV 1.94、cargo-deny、OpenAPI lint 同样通过。
 
 尚未在本机验证，需在对应环境执行：
 
 - PostgreSQL 实库迁移与并发行为（代码编译通过，迁移在连接时自动运行；本次测试使用内存存储）。
 - 真实外部模型 API 的端到端任务（需要有效端点、模型名与密钥）。
-- Linux/macOS 的实际运行（当前仅完成 Windows 11 x64 的运行验证；仓库已提供三平台 CI 工作流，尚未在 GitHub Actions 上实际运行）。
+- Linux/macOS 上的人工交互运行与真实部署（三平台 CI 已执行完整构建与测试，本机只做了 Windows 11 x64 的实际运行）。
 - systemd、launchd、Windows 计划任务、Docker Compose、Caddy 的实际部署（模板已提供，未在本机启动）。
 - 浏览器/前端界面不存在；本项目只提供 CLI 与 HTTP/WebSocket API。
 
