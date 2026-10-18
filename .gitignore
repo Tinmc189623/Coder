@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+.env
+*.log
+.DS_Store
+Thumbs.db
+/coder.db
+/coder.db-shm
+/coder.db-wal

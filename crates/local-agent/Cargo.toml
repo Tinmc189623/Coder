@@ -1,0 +1,34 @@
+[package]
+name = "coder-local-agent"
+description = "Local execution agent that maintains an authenticated outbound connection to Coder Cloud"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+coder-core = { path = "../core", version = "0.1.0" }
+coder-protocol = { path = "../protocol", version = "0.1.0" }
+dunce.workspace = true
+futures.workspace = true
+figment.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Memory"] }

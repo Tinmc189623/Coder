@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: coder
+      POSTGRES_DB: coder
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coder -d coder"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+  cloud:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CODER_CLOUD_BIND: 0.0.0.0:8080
+      CODER_CLOUD_PUBLIC_URL: https://${CODER_DOMAIN:?CODER_DOMAIN is required}
+      CODER_CLOUD_DATABASE_URL: postgres://coder:${POSTGRES_PASSWORD}@postgres:5432/coder
+      CODER_CLOUD_JWT_SECRET: ${CODER_CLOUD_JWT_SECRET:?CODER_CLOUD_JWT_SECRET is required}
+      CODER_CLOUD_ADMIN_API_KEY: ${CODER_CLOUD_ADMIN_API_KEY:?CODER_CLOUD_ADMIN_API_KEY is required}
+      CODER_CLOUD_ALLOW_INSECURE_HTTP: "true"
+      CODER_CLOUD_TRUST_PROXY_HEADERS: "true"
+      CODER_CLOUD_MODEL__BASE_URL: ${CODER_CLOUD_MODEL__BASE_URL:-}
+      CODER_CLOUD_MODEL__MODEL: ${CODER_CLOUD_MODEL__MODEL:-}
+      CODER_CLOUD_MODEL__API_KEY: ${CODER_CLOUD_MODEL__API_KEY:-}
+      RUST_LOG: coder_cloud=info,tower_http=info
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      cloud:
+        condition: service_healthy
+    environment:
+      CODER_DOMAIN: ${CODER_DOMAIN:?CODER_DOMAIN is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

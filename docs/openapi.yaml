@@ -1,0 +1,944 @@
+openapi: 3.0.3
+info:
+  title: Coder Cloud API
+  version: 0.1.0
+  license:
+    name: MIT
+    identifier: MIT
+  description: |
+    编程智能体云端协调接口。所有 REST 响应为 JSON，时间使用 RFC 3339 UTC。
+    设备 WebSocket 协议见 docs/API.md，OpenAPI 仅描述 HTTP 升级入口。
+    错误响应统一为 {error:{code,message,request_id}}。
+servers:
+  - url: https://coder.example.com
+    description: 生产部署示例
+  - url: http://127.0.0.1:8080
+    description: 本机联调（仅回环地址允许明文）
+
+tags:
+  - name: health
+    description: 健康、就绪与 Prometheus 指标，无需认证。
+  - name: admin
+    description: 使用 x-admin-key 创建用户与一次性配对令牌。
+  - name: devices
+    description: 设备注册、令牌交换、列表、当前用户查询与 WebSocket 升级。
+  - name: tasks
+    description: 任务生命周期、取消、重试与高风险权限决定。
+  - name: model
+    description: 使用设备 JWT 调用的 OpenAI 兼容模型代理。
+
+paths:
+  /api/v1/health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: 健康检查
+      security: []
+      responses:
+        "200":
+          description: 服务存活
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, version, uptime_secs]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  version:
+                    type: string
+                  uptime_secs:
+                    type: integer
+                    format: int64
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/ready:
+    get:
+      operationId: getReady
+      tags: [health]
+      summary: 就绪检查
+      description: 验证存储连接；数据库不可达时返回 503。
+      security: []
+      responses:
+        "200":
+          description: 已就绪
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ready]
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/metrics:
+    get:
+      operationId: getMetrics
+      tags: [health]
+      summary: Prometheus 指标
+      description: 生产环境应限制为监控网络可访问。
+      security: []
+      responses:
+        "200":
+          description: Prometheus 文本格式
+          content:
+            text/plain:
+              schema:
+                type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/admin/users:
+    post:
+      operationId: createUser
+      tags: [admin]
+      summary: 创建用户
+      security:
+        - AdminKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  maxLength: 254
+      responses:
+        "201":
+          description: 用户已创建；api_key 只返回一次
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedUser"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/admin/pairing-tokens:
+    post:
+      operationId: createPairingToken
+      tags: [admin]
+      summary: 签发一次性配对令牌
+      security:
+        - AdminKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: 配对令牌已签发
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pairing_token, expires_at]
+                properties:
+                  pairing_token:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/devices/register:
+    post:
+      operationId: registerDevice
+      tags: [devices]
+      summary: 使用配对令牌注册设备
+      description: 配对令牌一次性消费；device_secret 只返回一次。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pairing_token, name, platform, agent_version]
+              properties:
+                pairing_token:
+                  type: string
+                  minLength: 16
+                  maxLength: 512
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                platform:
+                  type: string
+                  maxLength: 32
+                agent_version:
+                  type: string
+                  maxLength: 32
+      responses:
+        "201":
+          description: 设备已注册
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_id, device_secret, user_id]
+                properties:
+                  device_id:
+                    type: string
+                    format: uuid
+                  device_secret:
+                    type: string
+                  user_id:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/devices/token:
+    post:
+      operationId: createDeviceToken
+      tags: [devices]
+      summary: 用设备密钥换取短期访问令牌
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, device_secret]
+              properties:
+                device_id:
+                  type: string
+                  format: uuid
+                device_secret:
+                  type: string
+                  maxLength: 512
+      responses:
+        "200":
+          description: 令牌已签发
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, token_type, expires_in_secs]
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                    enum: [Bearer]
+                  expires_in_secs:
+                    type: integer
+                    format: int64
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/devices:
+    get:
+      operationId: listDevices
+      tags: [devices]
+      summary: 列出当前用户的设备
+      security:
+        - UserKey: []
+      responses:
+        "200":
+          description: 设备列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Device"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/me:
+    get:
+      operationId: getCurrentUser
+      tags: [devices]
+      summary: 当前用户信息
+      security:
+        - UserKey: []
+      responses:
+        "200":
+          description: 当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/tasks:
+    get:
+      operationId: listTasks
+      tags: [tasks]
+      summary: 列出当前用户的任务
+      security:
+        - UserKey: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: 任务列表，按创建时间倒序
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaskView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    post:
+      operationId: createTask
+      tags: [tasks]
+      summary: 创建设备任务
+      description: 设备必须属于当前用户；创建后尝试立即下发。
+      security:
+        - UserKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskRequest"
+      responses:
+        "202":
+          description: 任务已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/tasks/{task_id}:
+    get:
+      operationId: getTask
+      tags: [tasks]
+      summary: 查询任务
+      security:
+        - UserKey: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 任务详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/tasks/{task_id}/cancel:
+    post:
+      operationId: cancelTask
+      tags: [tasks]
+      summary: 请求取消任务
+      description: pending 任务直接取消；活动任务设置取消标志并通过 WebSocket 通知设备。
+      security:
+        - UserKey: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 最新任务状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/tasks/{task_id}/retry:
+    post:
+      operationId: retryTask
+      tags: [tasks]
+      summary: 以新 attempt 重试终态任务
+      security:
+        - UserKey: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "202":
+          description: 新 attempt 已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/tasks/{task_id}/permissions:
+    get:
+      operationId: listPermissions
+      tags: [tasks]
+      summary: 列出待处理权限请求
+      security:
+        - UserKey: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 待处理权限请求
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PendingPermission"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/tasks/{task_id}/permissions/{request_id}:
+    post:
+      operationId: decidePermission
+      tags: [tasks]
+      summary: 批准或拒绝权限请求
+      security:
+        - UserKey: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+        - name: request_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [granted]
+              properties:
+                granted:
+                  type: boolean
+                reason:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: 决定已持久化并推送给设备
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionDecision"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/model/chat:
+    post:
+      operationId: modelChat
+      tags: [model]
+      summary: 云端模型代理
+      description: 仅设备 JWT 可用；云端未配置模型端点时返回 503。
+      security:
+        - DeviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: 模型响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          description: 上游模型失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/v1/agent/ws:
+    get:
+      operationId: agentWebSocket
+      tags: [devices]
+      summary: 设备 WebSocket 入口
+      description: |
+        Authorization 使用设备 JWT。升级成功后必须先发送 hello，再接收 welcome。
+        消息类型、重连与恢复语义见 docs/API.md。
+      security:
+        - DeviceToken: []
+      responses:
+        "101":
+          description: WebSocket 协议切换
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+components:
+  securitySchemes:
+    UserKey:
+      type: http
+      scheme: bearer
+      bearerFormat: ck_...
+      description: 用户 API key，由管理员创建用户时返回一次。
+    DeviceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 设备短期令牌，由 /api/v1/devices/token 换取。
+    AdminKey:
+      type: apiKey
+      in: header
+      name: x-admin-key
+      description: 云端管理员密钥，仅用于用户与配对令牌管理。
+
+  parameters:
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: 请求不合法
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    Unauthorized:
+      description: 未认证或凭据无效
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            example: Bearer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    Forbidden:
+      description: 无权访问该资源
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    NotFound:
+      description: 资源不存在或不属于当前用户
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    Conflict:
+      description: 状态冲突
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    RateLimited:
+      description: 超过调用方速率限制
+      headers:
+        Retry-After:
+          schema:
+            type: string
+            example: "5"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    ServiceUnavailable:
+      description: 依赖不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+
+  schemas:
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - unauthorized
+                - forbidden
+                - invalid_request
+                - protocol_version_unsupported
+                - task_not_found
+                - task_conflict
+                - permission_denied
+                - rate_limited
+                - internal
+                - unavailable
+            message:
+              type: string
+            request_id:
+              type: string
+              nullable: true
+
+    CreatedUser:
+      type: object
+      required: [user_id, email, api_key, created_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        api_key:
+          type: string
+          description: 只返回一次
+        created_at:
+          type: string
+          format: date-time
+
+    CurrentUser:
+      type: object
+      required: [user_id, email, created_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        created_at:
+          type: string
+          format: date-time
+
+    Device:
+      type: object
+      required: [device_id, user_id, name, platform, agent_version, online, created_at]
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        platform:
+          type: string
+        agent_version:
+          type: string
+        online:
+          type: boolean
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    TaskLimits:
+      type: object
+      properties:
+        max_iterations:
+          type: integer
+          minimum: 1
+          maximum: 200
+        max_duration_secs:
+          type: integer
+          minimum: 1
+          maximum: 7200
+        max_tool_calls:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        token_budget:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 2000000
+
+    CreateTaskRequest:
+      type: object
+      required: [device_id, prompt, workspace]
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 32000
+        workspace:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Agent 机器上的绝对路径
+        limits:
+          $ref: "#/components/schemas/TaskLimits"
+
+    TaskView:
+      type: object
+      required:
+        - task_id
+        - device_id
+        - user_id
+        - prompt
+        - workspace
+        - status
+        - attempt
+        - files_changed
+        - created_at
+        - updated_at
+        - limits
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        prompt:
+          type: string
+        workspace:
+          type: string
+        status:
+          type: string
+          enum: [pending, assigned, running, succeeded, failed, canceled, unknown]
+        attempt:
+          type: integer
+          minimum: 0
+        summary:
+          type: string
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        files_changed:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        lease_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        limits:
+          $ref: "#/components/schemas/TaskLimits"
+
+    PendingPermission:
+      type: object
+      required: [task_id, request_id, tool, action, details, risk, created_at]
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        request_id:
+          type: string
+          format: uuid
+        tool:
+          type: string
+        action:
+          type: string
+        details:
+          type: string
+        risk:
+          type: string
+          enum: [low, medium, high]
+        created_at:
+          type: string
+          format: date-time
+
+    PermissionDecision:
+      type: object
+      required: [task_id, request_id, granted]
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        request_id:
+          type: string
+          format: uuid
+        granted:
+          type: boolean
+        reason:
+          type: string
+          nullable: true
+
+    ChatMessage:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          type: string
+          nullable: true
+        tool_calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolCall"
+        tool_call_id:
+          type: string
+          nullable: true
+
+    ToolCall:
+      type: object
+      required: [id, name, arguments]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        arguments:
+          type: string
+          description: JSON 编码的参数字符串
+
+    ToolSpec:
+      type: object
+      description: OpenAI 兼容的 function 工具描述
+      additionalProperties: true
+
+    ChatRequest:
+      type: object
+      required: [messages, temperature, max_output_tokens, stream]
+      properties:
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 256
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        tools:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolSpec"
+        temperature:
+          type: number
+          format: float
+        max_output_tokens:
+          type: integer
+        stream:
+          type: boolean
+
+    TokenUsage:
+      type: object
+      properties:
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+
+    ModelResponse:
+      type: object
+      properties:
+        content:
+          type: string
+          nullable: true
+        tool_calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolCall"
+        finish_reason:
+          type: string
+          nullable: true
+        usage:
+          $ref: "#/components/schemas/TokenUsage"

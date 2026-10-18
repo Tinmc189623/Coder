@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nexsteaduser.coder-cloud</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/coder/bin/coder-cloud</string>
+    </array>
+    <key>UserName</key>
+    <string>coder</string>
+    <key>GroupName</key>
+    <string>staff</string>
+    <key>WorkingDirectory</key>
+    <string>/usr/local/coder</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>CODER_CLOUD_CONFIG</key>
+        <string>/usr/local/coder/etc/cloud.toml</string>
+        <key>RUST_LOG</key>
+        <string>coder_cloud=info,tower_http=info</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>/usr/local/coder/log/cloud.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/usr/local/coder/log/cloud.stderr.log</string>
+</dict>
+</plist>

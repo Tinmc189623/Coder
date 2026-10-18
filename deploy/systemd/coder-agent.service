@@ -1,0 +1,22 @@
+[Unit]
+Description=Coder local agent
+Documentation=https://github.com/Nexsteaduser/Coder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/coder agent run --config %h/.config/coder/agent.toml
+Environment=RUST_LOG=coder=info
+# 可选：模型密钥等通过环境变量文件注入，权限设为 0600。
+EnvironmentFile=-%h/.config/coder/agent.env
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=180
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

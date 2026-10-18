@@ -1,0 +1,41 @@
+[Unit]
+Description=Coder Cloud coordination server
+Documentation=https://github.com/Nexsteaduser/Coder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=coder
+Group=coder
+WorkingDirectory=/opt/coder
+Environment=RUST_LOG=coder_cloud=info,tower_http=info
+# 可选：环境变量文件需包含 CODER_CLOUD_* 配置，权限设为 0600 coder:coder。
+EnvironmentFile=-/etc/coder/cloud.env
+ExecStart=/opt/coder/bin/coder-cloud
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+ReadWritePaths=/var/lib/coder
+
+[Install]
+WantedBy=multi-user.target

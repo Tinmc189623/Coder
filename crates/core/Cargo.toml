@@ -1,0 +1,42 @@
+[package]
+name = "coder-core"
+description = "Agent execution engine, tools, model adapters and local persistence for Coder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+coder-protocol = { path = "../protocol", version = "0.1.0" }
+dirs.workspace = true
+dunce.workspace = true
+figment.workspace = true
+futures.workspace = true
+globset.workspace = true
+hex.workspace = true
+ignore.workspace = true
+rand.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+similar.workspace = true
+sqlx.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.177"
+
+[dev-dependencies]
+axum.workspace = true
+http-body-util = "0.1.5"
+tower.workspace = true
