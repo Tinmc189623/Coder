@@ -400,6 +400,78 @@ Windows 的 `device.json` 由 DPAPI 保护，只能在原用户、原机器解�
 
 TLS 私钥、`cloud.env`/`cloud.toml` 与数据库备份分开保存，限制访问。
 
+## CI/CD
+
+### 持续集成
+
+`.github/workflows/ci.yml` 在 `main`/`master` 推送与所有 Pull Request 上运行：
+
+- Ubuntu/Windows/macOS 三平台 `clippy -D warnings` 与完整测试；
+- Ubuntu 格式检查；
+- 三平台 release 构建（Linux x86_64、Windows x64、macOS arm64）；
+- Rust 1.94 MSRV 编译检查；
+- `cargo deny check` 与 OpenAPI 校验。
+
+### 发布
+
+`.github/workflows/release.yml` 在 `v*` 标签上执行完整发布；`main` 分支推送只发布 edge 镜像。发布前先在三个平台跑 fmt、clippy 与测试，然后：
+
+1. 校验标签版本与工作区 `Cargo.toml` 的 `version` 一致；
+2. 构建 `x86_64-unknown-linux-gnu`、`x86_64-unknown-linux-musl`、`x86_64-pc-windows-msvc`、`x86_64-apple-darwin`、`aarch64-apple-darwin`；
+3. 每个平台打包 `coder` 与 `coder-cloud`，附 README、LICENSE 与 API/部署/安全文档，生成独立 SHA-256；
+4. 汇总 `SHA256SUMS`，创建 GitHub Release；
+5. 构建 `linux/amd64` 与 `linux/arm64` 镜像并推送到 `ghcr.io/<owner>/coder-cloud`。
+
+标签必须是 `v` 加上工作区版本，例如版本 `0.1.0` 对应标签 `v0.1.0`；不一致时流水线直接失败。预发布标签（包含 `-`，例如 `v0.2.0-rc.1`）会标记为 prerelease，且不更新 `latest`。
+
+本地生成同样的压缩包无需 CI：
+
+```powershell
+cargo build --release --workspace
+$version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+Compress-Archive -Path target\release\coder.exe, target\release\coder-cloud.exe `
+    -DestinationPath "coder-$version-x86_64-pc-windows-msvc.zip"
+```
+
+发布镜像并部署到服务器：
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+流水线完成后，在 Actions 中手动运行 **Deploy**，选择 `staging` 或 `production` 与镜像标签（例如 `0.1.0`）。
+
+### 部署工作流
+
+`.github/workflows/deploy.yml` 只支持手动触发，使用 GitHub Environment 保护规则（建议生产环境启用 required reviewers）。它通过 SSH 把 `deploy/docker-compose.prod.yml` 与 Caddyfile 同步到服务器 `/opt/coder/`，登录 GHCR，拉取指定镜像并重启云端，最后轮询 `/api/v1/ready`。
+
+服务器一次性准备：
+
+```bash
+sudo install -d -m 0755 /opt/coder /opt/coder/caddy
+sudo install -m 0600 /dev/null /opt/coder/.env
+# 写入 POSTGRES_PASSWORD、CODER_DOMAIN、CODER_CLOUD_JWT_SECRET、
+# CODER_CLOUD_ADMIN_API_KEY，可选模型代理变量
+sudo docker compose -f /opt/coder/docker-compose.yml up -d postgres
+```
+
+`.env` 位于 `/opt/coder/.env`，Compose 会自动读取。Caddy 的数据卷保存证书，重建容器不会重复签发。数据库迁移在云端启动时自动执行；升级前仍需备份，回滚步骤见上一节。
+
+在仓库 Secrets 中配置，分别写入 `staging` 与 `production` 两个 Environment：
+
+| Secret | 内容 |
+| --- | --- |
+| `DEPLOY_HOST` | 服务器地址 |
+| `DEPLOY_USER` | SSH 用户，需要有 Docker 权限 |
+| `DEPLOY_SSH_KEY` | 部署私钥，公钥加入服务器 `authorized_keys` |
+| `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan -H <host>` 的完整输出，避免 TOFU |
+| `DEPLOY_DOMAIN` | 对外域名，用于就绪检查 |
+| `GHCR_USER` | 拉取镜像的 GitHub 用户名 |
+| `GHCR_TOKEN` | 具有 `read:packages` 的 PAT |
+
+部署使用环境级 concurrency，同一环境不会并行发布。工作流不会修改服务器上的 `.env` 或数据库数据。
+
 ## 运维与安全基线
 
 - 云端口只允许 443（或代理端口）；PostgreSQL 只允许云端主机访问。不要向公网暴露 `memory://` 或明文 8080。

@@ -1,0 +1,85 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        required: true
+        default: staging
+      image_tag:
+        description: Image tag to deploy, for example 0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate image tag
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+            echo "::error::invalid image tag"
+            exit 1
+          fi
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+      - name: Upload deployment files
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" "install -d -m 0755 /opt/coder/caddy"
+          scp deploy/docker-compose.prod.yml "$DEPLOY_USER@$DEPLOY_HOST:/opt/coder/docker-compose.yml"
+          scp deploy/caddy/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:/opt/coder/caddy/Caddyfile"
+      - name: Authenticate registry and restart
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          GHCR_USER: ${{ secrets.GHCR_USER }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/$(printf '%s' "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')/coder-cloud:${IMAGE_TAG}"
+          printf '%s' "$GHCR_TOKEN" | ssh "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd /opt/coder && CODER_IMAGE='$image' docker compose pull cloud && CODER_IMAGE='$image' docker compose up -d --remove-orphans"
+      - name: Wait for readiness
+        env:
+          DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            if curl -fsS "https://${DEPLOY_DOMAIN}/api/v1/ready"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::deployment did not become ready"
+          exit 1

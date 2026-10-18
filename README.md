@@ -12,6 +12,7 @@ Nexsteaduser 维护此项目，联系邮箱：admin@nexsteaduser.com。
 - **可靠的任务状态机**：`pending → assigned → running → succeeded/failed/canceled/unknown`。断线后未收到结果不会标记成功；有副作用的尝试不会盲目重放；租约过期进入 `unknown`，迟到的真实结果仍可落账。
 - **设备身份与 TLS**：一次性配对令牌、Argon2 设备密钥与 API key、JWT 短期令牌、HTTPS/WSS、管理员常量时间密钥比较。
 - **可运维性**：健康/就绪/指标端点、结构化日志、请求 ID、限流、请求体限制、超时、优雅关闭、SQLite/PostgreSQL 持久化。
+- **CI/CD**：三平台 CI；`v*` 标签发布五个平台的二进制、校验和与多架构 GHCR 镜像；手动工作流经 SSH 部署生产 Compose 栈并验证就绪状态。
 
 ## 工作区结构
 
