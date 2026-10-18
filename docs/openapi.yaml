@@ -4,14 +4,18 @@ info:
   version: 0.1.0
   license:
     name: MIT
-    identifier: MIT
+    url: https://opensource.org/license/mit
   description: |
     编程智能体云端协调接口。所有 REST 响应为 JSON，时间使用 RFC 3339 UTC。
     设备 WebSocket 协议见 docs/API.md，OpenAPI 仅描述 HTTP 升级入口。
     错误响应统一为 {error:{code,message,request_id}}。
 servers:
-  - url: https://coder.example.com
-    description: 生产部署示例
+  - url: https://{host}
+    description: 生产部署，host 替换为实际对外域名
+    variables:
+      host:
+        default: coder.invalid
+        description: 云端域名；.invalid 是保留顶级域，仅作为语法默认值
   - url: http://127.0.0.1:8080
     description: 本机联调（仅回环地址允许明文）
 
